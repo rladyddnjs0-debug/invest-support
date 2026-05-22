@@ -1,0 +1,211 @@
+import yfinance as yf
+import pandas as pd
+import os
+import concurrent.futures
+import threading
+import requests
+import time
+from datetime import datetime, timedelta
+from pykrx import stock as krx_stock
+from abc import ABC, abstractmethod
+
+from modules.config import settings
+
+class BaseFetcher(ABC):
+    @abstractmethod
+    def fetch_fundamentals(self, tickers, progress_callback=None):
+        pass
+
+    @abstractmethod
+    def fetch_history(self, ticker, period, interval):
+        pass
+
+class DataTransformer:
+    """데이터 소스별 필드명을 표준 규격으로 변환"""
+    @staticmethod
+    def normalize_kr(df):
+        # pykrx -> 표준 필드
+        # 현재는 DataLoader 내부 로직에서 처리 중
+        return df
+
+    @staticmethod
+    def normalize_us(df):
+        # yfinance -> 표준 필드
+        return df
+
+class DataLoader:
+    def __init__(self, data_dir=None):
+        self.config = settings.data_loader
+        self.data_dir = data_dir if data_dir is not None else self.config.data_dir
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+            
+        self.tickers = {
+            "S&P500": "^GSPC", "NASDAQ": "^IXIC", "KOSPI": "^KS11", "KOSDAQ": "^KQ11",
+            "US10Y": "^TNX", "US2Y": "^IRX", "DXY": "DX-Y.NYB", "GOLD": "GC=F",
+            "OIL": "CL=F", "TIP": "TIP", "IEF": "IEF", "USD_KRW": "USDKRW=X",
+            "BTC": "BTC-USD", "VIX": "^VIX", "HYG": "HYG"
+        }
+        self.sector_etfs = {
+            "XLK": "XLK", "XLF": "XLF", "XLV": "XLV", "XLE": "XLE", 
+            "XLY": "XLY", "XLI": "XLI", "XLP": "XLP", "XLU": "XLU", 
+            "XLRE": "XLRE", "XLB": "XLB", "XLC": "XLC"
+        }
+        self.sample_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "UNH", "JNJ"]
+        self.portfolio_path = os.path.join(self.data_dir, "portfolio.json")
+
+    def save_portfolio(self, portfolio_data):
+        import json
+        with open(self.portfolio_path, 'w') as f:
+            json.dump(portfolio_data, f, indent=4)
+
+    def load_portfolio(self):
+        import json
+        if os.path.exists(self.portfolio_path):
+            with open(self.portfolio_path, 'r') as f:
+                return json.load(f)
+        return []
+
+    def get_sp500_tickers(self):
+        try:
+            url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=10)
+            table = pd.read_html(response.text)
+            df = table[0]
+            tickers = [t.replace('.', '-') for t in df['Symbol'].tolist()]
+            return tickers
+        except: return self.sample_stocks
+
+    def get_kospi200_tickers(self):
+        try:
+            target_date = datetime.now()
+            for _ in range(7):
+                date_str = target_date.strftime("%Y%m%d")
+                tickers = krx_stock.get_index_portfolio_deposit_file("1028", date_str)
+                if tickers and len(tickers) > 150:
+                    return [t + ".KS" for t in tickers]
+                target_date -= timedelta(days=1)
+            return ["005930.KS", "000660.KS", "035420.KS"]
+        except: return ["005930.KS", "000660.KS"]
+
+    def get_stock_fundamentals(self, tickers=None, progress_callback=None, market_name="us"):
+        if tickers is None: tickers = self.sample_stocks
+        cache_file = f"{market_name}_fundamentals.csv"
+        cache_path = os.path.join(self.data_dir, cache_file)
+        
+        if os.path.exists(cache_path):
+            file_mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+            if (datetime.now() - file_mtime).days < self.config.cache_expiry_days:
+                df_cache = pd.read_csv(cache_path)
+                if set(tickers).issubset(set(df_cache['Ticker'].astype(str).tolist())):
+                    return df_cache[df_cache['Ticker'].isin(tickers)]
+
+        fundamental_data = []
+        if market_name == "kr":
+            try:
+                target_date = datetime.now()
+                df_krx = None
+                for _ in range(7):
+                    date_str = target_date.strftime("%Y%m%d")
+                    df_kospi = krx_stock.get_market_fundamental_by_ticker(date_str, market="KOSPI")
+                    df_kosdaq = krx_stock.get_market_fundamental_by_ticker(date_str, market="KOSDAQ")
+                    if not df_kospi.empty and df_kospi['PER'].sum() > 0:
+                        df_krx = pd.concat([df_kospi, df_kosdaq]); break
+                    target_date -= timedelta(days=1)
+                
+                if df_krx is not None:
+                    df_cap = krx_stock.get_market_cap_by_ticker(date_str, market="ALL")
+                    six_months_ago = (target_date - timedelta(days=180)).strftime("%Y%m%d")
+                    df_momentum = krx_stock.get_market_price_change_by_ticker(six_months_ago, date_str)
+                    
+                    for full_ticker in tickers:
+                        pure_ticker = full_ticker.split('.')[0]
+                        if pure_ticker in df_krx.index:
+                            row = df_krx.loc[pure_ticker]
+                            eps, bps = row.get('EPS', 0), row.get('BPS', 1)
+                            roe = (eps / bps * 100) if bps > 0 else 0
+                            mcap = df_cap.loc[pure_ticker, '시가총액'] if pure_ticker in df_cap.index else 0
+                            mom = df_momentum.loc[pure_ticker, '등락률'] if pure_ticker in df_momentum.index else 0
+                            fundamental_data.append({
+                                'Ticker': full_ticker, 'Name': krx_stock.get_market_ticker_name(pure_ticker),
+                                'Sector': 'KOSPI' if pure_ticker in df_kospi.index else 'KOSDAQ',
+                                'Price': row.get('종가', 0), 'PER': row.get('PER', 0), 'PBR': row.get('PBR', 0),
+                                'ROE': roe, 'ProfitMargin': 0, 'RevenueGrowth': 0, 'MarketCap': mcap, 'Momentum': mom
+                            })
+            except Exception as e: print(f"KR Error: {e}")
+        else:
+            # US logic (omitted for brevity in this tool call, keeping existing logic)
+            # Actually I should keep the logic. I'll just rewrite the whole file carefully.
+            lock = threading.Lock(); total = len(tickers); count = 0
+            batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
+            
+            def fetch_single_ticker(ticker):
+                nonlocal count; curr_price = 0; mom = 0
+                try:
+                    if not batch_data.empty:
+                        t_data = batch_data[ticker].dropna() if len(tickers) > 1 else batch_data.dropna()
+                        if not t_data.empty:
+                            curr_price = t_data['Close'].iloc[-1]
+                            mom = (t_data['Close'].iloc[-1] / t_data['Close'].iloc[0] - 1) * 100
+                except: pass
+                try:
+                    info = yf.Ticker(ticker).info
+                    data = {
+                        'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
+                        'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
+                        'PER': info.get('trailingPE', 0), 'PBR': info.get('priceToBook', 0),
+                        'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
+                        'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
+                        'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100)
+                    }
+                    with lock: fundamental_data.append(data); count += 1
+                except:
+                    with lock: count += 1; fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                executor.map(fetch_single_ticker, tickers)
+
+        result_df = pd.DataFrame(fundamental_data)
+        if not result_df.empty: result_df.to_csv(cache_path, index=False)
+        return result_df
+
+    def get_market_history(self, name, period="5y", interval="1d", force_download=False):
+        ticker_symbol = self.tickers.get(name, name)
+        file_path = os.path.join(self.data_dir, f"{name.lower().replace('/', '_')}_history.csv")
+        
+        should_download = force_download
+        if not os.path.exists(file_path):
+            should_download = True
+        else:
+            # 파일이 오늘 생성되지 않았거나, 데이터가 너무 짧으면 다운로드 검토
+            file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+            if file_mtime.date() != datetime.now().date():
+                should_download = True
+            else:
+                # 오늘 생성된 파일이라도, 기간이 "max"인데 데이터가 적으면 재다운로드
+                df_cached = pd.read_csv(file_path, index_col=0, parse_dates=True)
+                if period == "max" and len(df_cached) < 1000: # 대략적인 임계값
+                    should_download = True
+                else:
+                    return df_cached
+
+        if should_download:
+            try:
+                data = yf.download(ticker_symbol, period=period, interval=interval)
+                if not data.empty:
+                    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+                    data.to_csv(file_path); return data
+            except: return None
+        return None
+
+    def get_sector_data(self, period="5y"):
+        sector_data = {name: self.get_market_history(name, period=period)['Close'] for name in self.sector_etfs}
+        return pd.DataFrame(sector_data)
+
+    def get_yield_spread(self, period="5y"):
+        ten_y, two_y = self.get_market_history("US10Y", period=period), self.get_market_history("US2Y", period=period)
+        if ten_y is not None and two_y is not None:
+            df = pd.DataFrame({'10Y': ten_y['Close'], '2Y': two_y['Close']}).ffill().dropna()
+            df['Spread'] = df['10Y'] - df['2Y']; return df[['Spread']]
+        return None

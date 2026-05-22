@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Data & Cache
+data/*.json
+data/*.csv
+data/cache/
+.pytest_cache/
+.coverage
+htmlcov/
+streamlit.log
+
+# OS
+.DS_Store
+Thumbs.db

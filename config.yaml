@@ -1,0 +1,80 @@
+# Investment Analysis Engine Configuration
+
+# LPPL Engine Parameters
+lppl:
+  min_data_points: 200
+  bubble_threshold: 70
+  warning_threshold: 40
+  m_bounds: [0.1, 0.9]
+  omega_bounds: [6.0, 13.0]
+  tc_range_days: [1, 500]
+  max_oscillation_ratio: 1.5 # C / |B|
+  num_iterations: 100
+  window_sizes: [120, 250, 500]
+
+# Market Attractiveness Model
+attractiveness:
+  rsi_window: 14
+  ma_long: 200
+  z_score_multiplier: 20
+  volatility_low: 0.18
+  volatility_high: 0.22
+  risk_composite_low: 40
+  risk_composite_high: 60
+  sigmoid_k_spread: 400
+  sigmoid_k_mom: 1000
+  
+  regime_weights:
+    risk_on:
+      trend: 0.35
+      macro: 0.15
+      sentiment: 0.15
+      liquidity: 0.15
+      breadth: 0.1
+      credit: 0.1
+    risk_off:
+      trend: 0.1
+      macro: 0.3
+      sentiment: 0.1
+      liquidity: 0.2
+      breadth: 0.1
+      credit: 0.2
+    transition:
+      trend: 0.25
+      macro: 0.25
+      sentiment: 0.15
+      liquidity: 0.15
+      breadth: 0.1
+      credit: 0.1
+
+# Portfolio & Risk Management
+portfolio:
+  show_portfolio: false
+  default_capital: 10000000
+  max_equity_weight_at_high_risk: 20.0
+  danger_thresholds: [50, 70, 85]
+  risk_penalties: [1.0, 0.8, 0.5, 0.2] # Corresponds to thresholds
+
+# Quant Screener
+screener:
+  regime_factor_weights:
+    risk_on:
+      quality: 0.2
+      value: 0.1
+      growth: 0.4
+      momentum: 0.3
+    risk_off:
+      quality: 0.5
+      value: 0.3
+      growth: 0.1
+      momentum: 0.1
+    transition:
+      quality: 0.3
+      value: 0.4
+      growth: 0.1
+      momentum: 0.2
+
+# Data Loader
+data_loader:
+  cache_expiry_days: 7
+  data_dir: "data"
