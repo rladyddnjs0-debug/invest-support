@@ -1207,29 +1207,10 @@ if st.session_state.active_ticker:
     # 상세 분석 다이얼로그 호출
     show_stock_details(st.session_state.active_ticker)
 
-# 3. 관리자 로그 뷰어 (사이드바 체크박스로 활성화)
-import os
+# 3. 관리자 로그 뷰어 메뉴 (전용 페이지 이동)
 st.sidebar.markdown("---")
-if st.sidebar.checkbox("🛠️ 관리자 로그 보기"):
-    st.markdown("---")
-    st.subheader("📋 시스템 로그 (최신 100줄)")
-    log_file = f"logs/invest_{datetime.now().strftime('%Y%m%d')}.log"
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                # 최신 로그가 위에 오도록 역순 출력하거나, 가독성을 위해 순차 출력 후 scroll 처리
-                log_text = "".join(lines[-100:])
-                st.code(log_text, language="log")
-                
-            if st.button("🗑️ 오늘 로그 파일 삭제"):
-                os.remove(log_file)
-                st.success("로그 파일이 삭제되었습니다. 새로고침하면 다시 생성됩니다.")
-                st.rerun()
-        except Exception as e:
-            st.error(f"로그를 읽는 중 오류가 발생했습니다: {e}")
-    else:
-        st.info("오늘 생성된 로그 파일이 없습니다. 앱을 조작하면 로그가 기록됩니다.")
+if st.sidebar.button("🛠️ 관리자 시스템 로그", use_container_width=True):
+    st.switch_page("pages/1_Admin_Logs.py")
 
 st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
