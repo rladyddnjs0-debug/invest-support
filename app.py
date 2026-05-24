@@ -1207,10 +1207,5 @@ if st.session_state.active_ticker:
     # 상세 분석 다이얼로그 호출
     show_stock_details(st.session_state.active_ticker)
 
-# 3. 관리자 로그 뷰어 메뉴 (전용 페이지 이동)
-st.sidebar.markdown("---")
-if st.sidebar.button("🛠️ 관리자 시스템 로그", use_container_width=True):
-    st.switch_page("pages/1_Admin_Logs.py")
-
 st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
