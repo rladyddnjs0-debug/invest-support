@@ -9,6 +9,7 @@ env/
 .env
 
 # Data & Cache
+logs/
 data/*.json
 data/*.csv
 data/cache/
