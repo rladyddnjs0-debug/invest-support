@@ -8,11 +8,15 @@ load_dotenv()
 class AIReporter:
     def __init__(self):
         # Streamlit Secrets 우선 확인, 없으면 환경 변수 확인
-        api_key = None
-        if "GOOGLE_API_KEY" in st.secrets:
-            api_key = st.secrets["GOOGLE_API_KEY"]
-        else:
-            api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
+        
+        # st.secrets는 로컬에 파일이 없으면 에러를 던지므로 안전하게 접근
+        try:
+            if not api_key and "GOOGLE_API_KEY" in st.secrets:
+                api_key = st.secrets["GOOGLE_API_KEY"]
+        except Exception:
+            # st.secrets 접근 실패 시 무시하고 os.getenv 결과 사용
+            pass
 
         if api_key:
             genai.configure(api_key=api_key)
