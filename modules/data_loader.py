@@ -86,8 +86,20 @@ class DataLoader:
                 if tickers and len(tickers) > 150:
                     return [t + ".KS" for t in tickers]
                 target_date -= timedelta(days=1)
-            return ["005930.KS", "000660.KS", "035420.KS"]
-        except: return ["005930.KS", "000660.KS"]
+            return [
+                "005930.KS", "000660.KS", "373220.KS", "207940.KS", "005380.KS",
+                "068270.KS", "000270.KS", "005490.KS", "035420.KS", "006400.KS",
+                "051910.KS", "035720.KS", "003550.KS", "012330.KS", "032830.KS",
+                "096770.KS", "033780.KS", "000810.KS", "015760.KS", "018260.KS"
+            ]
+        except:
+            return [
+                "005930.KS", "000660.KS", "373220.KS", "207940.KS", "005380.KS",
+                "068270.KS", "000270.KS", "005490.KS", "035420.KS", "006400.KS",
+                "051910.KS", "035720.KS", "003550.KS", "012330.KS", "032830.KS",
+                "096770.KS", "033780.KS", "000810.KS", "015760.KS", "018260.KS"
+            ]
+
 
     def get_stock_fundamentals(self, tickers=None, progress_callback=None, market_name="us"):
         if tickers is None: tickers = self.sample_stocks
@@ -133,7 +145,68 @@ class DataLoader:
                                 'Price': row.get('종가', 0), 'PER': row.get('PER', 0), 'PBR': row.get('PBR', 0),
                                 'ROE': roe, 'ProfitMargin': 0, 'RevenueGrowth': 0, 'MarketCap': mcap, 'Momentum': mom
                             })
-            except Exception as e: print(f"KR Error: {e}")
+            except Exception as e:
+                print(f"KR Error (pykrx): {e}")
+
+            if not fundamental_data:
+                print("Falling back to yfinance for KR stock fundamentals...")
+                lock = threading.Lock()
+                total = len(tickers)
+                count = 0
+                batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
+                
+                def fetch_single_kr_ticker(ticker):
+                    nonlocal count; curr_price = 0; mom = 0
+                    try:
+                        if not batch_data.empty:
+                            t_data = batch_data[ticker].dropna() if len(tickers) > 1 else batch_data.dropna()
+                            if not t_data.empty:
+                                curr_price = t_data['Close'].iloc[-1]
+                                mom = (t_data['Close'].iloc[-1] / t_data['Close'].iloc[0] - 1) * 100
+                    except: pass
+
+                    try:
+                        info = yf.Ticker(ticker).info
+                        
+                        per = info.get('trailingPE')
+                        if per is None or per == 0:
+                            per = info.get('forwardPE', 0)
+                        if per is None:
+                            per = 0
+                            
+                        roe = info.get('returnOnEquity')
+                        if roe is None:
+                            roe = 0
+                        roe_pct = roe * 100
+                        
+                        pbr = info.get('priceToBook')
+                        if (pbr is None or pbr == 0) and roe > 0 and per > 0:
+                            pbr = roe * per
+                        if pbr is None:
+                            pbr = 0
+                            
+                        data = {
+                            'Ticker': ticker,
+                            'Name': info.get('shortName', ticker),
+                            'Sector': info.get('sector', 'N/A'),
+                            'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
+                            'PER': per,
+                            'PBR': pbr,
+                            'ROE': roe_pct,
+                            'ProfitMargin': info.get('profitMargins', 0) * 100,
+                            'RevenueGrowth': info.get('revenueGrowth', 0) * 100,
+                            'MarketCap': info.get('marketCap', 0),
+                            'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100)
+                        }
+                        with lock: fundamental_data.append(data); count += 1
+                    except:
+                        with lock:
+                            count += 1
+                            fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                    executor.map(fetch_single_kr_ticker, tickers)
+
         else:
             # US logic (omitted for brevity in this tool call, keeping existing logic)
             # Actually I should keep the logic. I'll just rewrite the whole file carefully.
@@ -166,7 +239,11 @@ class DataLoader:
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 executor.map(fetch_single_ticker, tickers)
 
+        result_df = pd.DataFrame(fundamental_data)
+        if not result_df.empty:
+            result_df.to_csv(cache_path, index=False)
         return result_df
+
 
     def get_historical_fundamentals(self, tickers, base_date, market_name="us"):
         """
