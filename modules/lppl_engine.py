@@ -8,6 +8,7 @@ import os
 import joblib
 
 from modules.config import settings
+from modules.logger import logger
 
 # 캐시 디렉토리 설정
 cache_dir = os.path.join(settings.data_loader.data_dir, "cache")
@@ -94,7 +95,9 @@ class LPPLEngine:
         phi_1, phi_2, phi_3 = self._lppl_basis(t, tc, m, omega)
         X = np.column_stack([np.ones_like(t), phi_1, phi_2, phi_3])
         try: return np.linalg.lstsq(X, y, rcond=None)[0]
-        except: return None
+        except Exception as e:
+            logger.debug(f"Linear solve failed: {e}")
+            return None
 
     def _objective(self, params, t, y):
         tc, m, omega = params
@@ -118,7 +121,8 @@ class LPPLEngine:
                     C = np.sqrt(beta[2]**2 + beta[3]**2)
                     if (C / np.abs(beta[1])) < self.config.max_oscillation_ratio:
                         return {'tc': tc, 'm': m, 'omega': omega, 'cost': res.cost, 'residuals': res.fun}
-        except: pass
+        except Exception:
+            pass
         return None
 
     def _validate_residuals(self, residuals):
@@ -126,7 +130,9 @@ class LPPLEngine:
             lb_pval = acorr_ljungbox(residuals, lags=[10])['lb_pvalue'].iloc[0]
             arch_pval = het_arch(residuals, nlags=10)[1]
             return np.clip(lb_pval * 5, 0, 1) * np.clip(arch_pval * 5, 0, 1)
-        except: return 0.0
+        except Exception as e:
+            logger.debug(f"Residual validation failed: {e}")
+            return 0.0
 
     def analyze_window(self, t, y, num_iterations=None):
         tc_min, tc_max = self.config.tc_range_days
@@ -147,7 +153,8 @@ class LPPLEngine:
             test_tcs = np.linspace(tcs.min(), tcs.max(), 200)
             peak_tc = test_tcs[np.argmax(kde(test_tcs))]
             stability_score = np.clip(np.max(kde(tcs)) * (tcs.max() - tcs.min()) / 2.0, 0, 1)
-        except:
+        except Exception as e:
+            logger.debug(f"KDE analysis failed: {e}")
             peak_tc = np.mean(tcs); stability_score = 0.3
         timing_score = np.exp(-(peak_tc - t[-1]) / 100.0)
         return {'peak_tc': peak_tc, 'fit_score': fit_score, 'stability_score': stability_score, 

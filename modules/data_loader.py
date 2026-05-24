@@ -10,6 +10,7 @@ from pykrx import stock as krx_stock
 from abc import ABC, abstractmethod
 
 from modules.config import settings
+from modules.logger import logger
 
 class BaseFetcher(ABC):
     @abstractmethod
@@ -75,7 +76,9 @@ class DataLoader:
             df = table[0]
             tickers = [t.replace('.', '-') for t in df['Symbol'].tolist()]
             return tickers
-        except: return self.sample_stocks
+        except Exception as e:
+            logger.warning(f"Error fetching S&P 500 tickers: {e}")
+            return self.sample_stocks
 
     def get_kospi200_tickers(self):
         try:
@@ -92,7 +95,8 @@ class DataLoader:
                 "051910.KS", "035720.KS", "003550.KS", "012330.KS", "032830.KS",
                 "096770.KS", "033780.KS", "000810.KS", "015760.KS", "018260.KS"
             ]
-        except:
+        except Exception as e:
+            logger.warning(f"Error fetching KOSPI 200 tickers from KRX: {e}")
             return [
                 "005930.KS", "000660.KS", "373220.KS", "207940.KS", "005380.KS",
                 "068270.KS", "000270.KS", "005490.KS", "035420.KS", "006400.KS",
@@ -146,10 +150,10 @@ class DataLoader:
                                 'ROE': roe, 'ProfitMargin': 0, 'RevenueGrowth': 0, 'MarketCap': mcap, 'Momentum': mom
                             })
             except Exception as e:
-                print(f"KR Error (pykrx): {e}")
+                logger.warning(f"KR Error (pykrx): {e}")
 
             if not fundamental_data:
-                print("Falling back to yfinance for KR stock fundamentals...")
+                logger.info("Falling back to yfinance for KR stock fundamentals...")
                 lock = threading.Lock()
                 total = len(tickers)
                 count = 0
@@ -161,9 +165,15 @@ class DataLoader:
                         if not batch_data.empty:
                             t_data = batch_data[ticker].dropna() if len(tickers) > 1 else batch_data.dropna()
                             if not t_data.empty:
-                                curr_price = t_data['Close'].iloc[-1]
-                                mom = (t_data['Close'].iloc[-1] / t_data['Close'].iloc[0] - 1) * 100
-                    except: pass
+                                price_col = t_data['Close']
+                                if isinstance(price_col, pd.DataFrame):
+                                    price_col = price_col.iloc[:, 0]
+                                
+                                curr_price = float(price_col.iloc[-1])
+                                start_price = float(price_col.iloc[0])
+                                mom = (curr_price / start_price - 1) * 100
+                    except Exception as e:
+                        logger.debug(f"Price/Momentum calculation failed for {ticker}: {e}")
 
                     try:
                         info = yf.Ticker(ticker).info
@@ -199,7 +209,8 @@ class DataLoader:
                             'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100)
                         }
                         with lock: fundamental_data.append(data); count += 1
-                    except:
+                    except Exception as e:
+                        logger.debug(f"Error fetching yfinance info for {ticker}: {e}")
                         with lock:
                             count += 1
                             fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
@@ -219,9 +230,15 @@ class DataLoader:
                     if not batch_data.empty:
                         t_data = batch_data[ticker].dropna() if len(tickers) > 1 else batch_data.dropna()
                         if not t_data.empty:
-                            curr_price = t_data['Close'].iloc[-1]
-                            mom = (t_data['Close'].iloc[-1] / t_data['Close'].iloc[0] - 1) * 100
-                except: pass
+                            price_col = t_data['Close']
+                            if isinstance(price_col, pd.DataFrame):
+                                price_col = price_col.iloc[:, 0]
+                            
+                            curr_price = float(price_col.iloc[-1])
+                            start_price = float(price_col.iloc[0])
+                            mom = (curr_price / start_price - 1) * 100
+                except Exception as e:
+                    logger.debug(f"Price/Momentum calculation failed for {ticker}: {e}")
                 try:
                     info = yf.Ticker(ticker).info
                     data = {
@@ -233,7 +250,8 @@ class DataLoader:
                         'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100)
                     }
                     with lock: fundamental_data.append(data); count += 1
-                except:
+                except Exception as e:
+                    logger.debug(f"Error fetching yfinance info for {ticker}: {e}")
                     with lock: count += 1; fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -242,6 +260,7 @@ class DataLoader:
         result_df = pd.DataFrame(fundamental_data)
         if not result_df.empty:
             result_df.to_csv(cache_path, index=False)
+            logger.info(f"Saved {market_name} fundamentals to cache: {cache_path}")
         return result_df
 
 
@@ -282,11 +301,15 @@ class DataLoader:
 
         if should_download:
             try:
+                logger.info(f"Downloading historical data for {ticker_symbol} ({period})...")
                 data = yf.download(ticker_symbol, period=period, interval=interval)
                 if not data.empty:
                     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-                    data.to_csv(file_path); return data
-            except: return None
+                    data.to_csv(file_path)
+                    return data
+            except Exception as e:
+                logger.error(f"Error downloading {ticker_symbol} history: {e}")
+                return None
         return None
 
     def get_sector_data(self, period="5y"):

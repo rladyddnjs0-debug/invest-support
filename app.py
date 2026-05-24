@@ -10,6 +10,7 @@ from modules.backtester import QuantBacktester
 from datetime import datetime
 from dotenv import load_dotenv
 from modules.config import settings
+from modules.logger import logger
 
 # 환경 변수 로드
 load_dotenv()
@@ -49,7 +50,8 @@ def show_stock_details(ticker):
                 elif exchange == "ASE": tv_symbol = f"AMEX:{clean_ticker}"
                 elif exchange == "PCX": tv_symbol = f"ARCA:{clean_ticker}"
                 else: tv_symbol = clean_ticker
-            except:
+            except Exception as e:
+                logger.debug(f"TradingView symbol resolution failed for {ticker}: {e}")
                 tv_symbol = f"NASDAQ:{ticker.replace('-', '.')}"
         st.session_state[f"tv_symbol_{ticker}"] = tv_symbol
     
@@ -152,7 +154,8 @@ def show_stock_details(ticker):
                             prompt = f"다음 뉴스들을 분석하여 투자 영향을 한국어로 요약하라:\n" + "\n".join([n.get('content', n).get('title', '') for n in news[:5]])
                             summary = reporter.model.generate_content(prompt).text
                             news_text += f"\n---\n#### 💡 AI 인사이트\n{summary}"
-                        except: pass
+                        except Exception as e:
+                            logger.error(f"AI News summary generation failed: {e}")
                     st.session_state[f"news_{ticker}"] = news_text
                     st.rerun() # Fragment 리런
 
@@ -170,7 +173,8 @@ def show_stock_details(ticker):
                     try:
                         st.session_state[f"ai_report_{ticker}"] = reporter.model.generate_content(prompt).text
                         st.rerun() # Fragment 리런
-                    except: pass
+                    except Exception as e:
+                        logger.error(f"AI Report generation failed: {e}")
         else:
             st.info("🤖 AI 전략 리포트 기능은 준비 중입니다.")
 
@@ -1202,6 +1206,30 @@ if 'active_ticker' not in st.session_state:
 if st.session_state.active_ticker:
     # 상세 분석 다이얼로그 호출
     show_stock_details(st.session_state.active_ticker)
+
+# 3. 관리자 로그 뷰어 (사이드바 체크박스로 활성화)
+import os
+st.sidebar.markdown("---")
+if st.sidebar.checkbox("🛠️ 관리자 로그 보기"):
+    st.markdown("---")
+    st.subheader("📋 시스템 로그 (최신 100줄)")
+    log_file = f"logs/invest_{datetime.now().strftime('%Y%m%d')}.log"
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                # 최신 로그가 위에 오도록 역순 출력하거나, 가독성을 위해 순차 출력 후 scroll 처리
+                log_text = "".join(lines[-100:])
+                st.code(log_text, language="log")
+                
+            if st.button("🗑️ 오늘 로그 파일 삭제"):
+                os.remove(log_file)
+                st.success("로그 파일이 삭제되었습니다. 새로고침하면 다시 생성됩니다.")
+                st.rerun()
+        except Exception as e:
+            st.error(f"로그를 읽는 중 오류가 발생했습니다: {e}")
+    else:
+        st.info("오늘 생성된 로그 파일이 없습니다. 앱을 조작하면 로그가 기록됩니다.")
 
 st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 

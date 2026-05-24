@@ -3,6 +3,7 @@ import pandas as pd
 from scipy.optimize import curve_fit
 from modules.lppl_engine import LPPLEngine
 from modules.config import settings
+from modules.logger import logger
 
 class AnalysisModel:
     def __init__(self):
@@ -364,8 +365,8 @@ class QuantScreener:
                     # 2. 변동성 계산 (최근 20일 표준편차 기반)
                     returns = hist['Close'].pct_change().dropna()
                     volatility = returns.tail(20).std()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Risk analysis failed for {ticker}: {e}")
             
             # 3. 리스크 조정 가중치 (Risk Parity 기초)
             # 변동성이 높을수록 비중 축소, 퀀트 스코어가 높을수록 비중 확대
@@ -455,8 +456,8 @@ class QuantScreener:
                     lppl_res = self.analysis_model.run_lppl_fit(hist['Close'])
                     if lppl_res:
                         danger_score = lppl_res['danger_score']
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Individual risk eval failed for {ticker}: {e}")
                 
             # 기본 비중: 퀀트 스코어 (0~100)
             base_score = score_map.get(ticker, 50.0)

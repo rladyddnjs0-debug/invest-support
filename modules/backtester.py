@@ -3,6 +3,7 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
 from modules.models import QuantScreener
+from modules.logger import logger
 
 class QuantBacktester:
     def __init__(self, data_loader):
@@ -71,5 +72,5 @@ class QuantBacktester:
             return top_10, result_df
             
         except Exception as e:
-            print(f"Error in backtest return calculation: {e}")
+            logger.error(f"Error in backtest return calculation: {e}", exc_info=True)
             return top_10, None
