@@ -1148,14 +1148,23 @@ elif menu == "🔍 종목 스크리너":
 
         # 4. 효율성 평면 (Scatter)
         st.markdown("#### 📊 가치 vs 효율성 평면")
-        fig_scatter = px.scatter(screened_df, x='PER', y='ROE', size='MarketCap', color='Sector', 
+        
+        # Plotly Express 데이터 전처리 (결측치 및 0 이하 값 처리)
+        scatter_df = screened_df.copy()
+        for col in ['PER', 'ROE', 'MarketCap']:
+            scatter_df[col] = pd.to_numeric(scatter_df[col], errors='coerce').fillna(0)
+        
+        # Plotly size 파라미터는 반드시 양수여야 함
+        scatter_df['SizeDisplay'] = scatter_df['MarketCap'].apply(lambda x: max(x, 1e-6))
+        
+        fig_scatter = px.scatter(scatter_df, x='PER', y='ROE', size='SizeDisplay', color='Sector', 
                                 hover_name='DisplayName', title="PER vs ROE (버블 사이즈: 시총)",
                                 template="plotly_dark", height=500)
         # 축 범위 조정 (이상치 영향 최소화)
-        per_max = screened_df['PER'].quantile(0.95)
-        roe_max = screened_df['ROE'].quantile(0.95)
+        per_max = scatter_df['PER'].quantile(0.95)
+        roe_max = scatter_df['ROE'].quantile(0.95)
         fig_scatter.update_xaxes(range=[0, per_max * 1.2] if per_max > 0 else None)
-        fig_scatter.update_yaxes(range=[screened_df['ROE'].min(), roe_max * 1.2] if roe_max > 0 else None)
+        fig_scatter.update_yaxes(range=[scatter_df['ROE'].min(), roe_max * 1.2] if roe_max > 0 else None)
         
         st.plotly_chart(fig_scatter, width="stretch")
 
