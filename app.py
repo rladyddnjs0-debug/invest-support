@@ -1078,19 +1078,18 @@ elif menu == "🔍 종목 스크리너":
         
         # 종목 식별 개선: 이름 뒤에 티커 병기 (중복 방지)
         # Name이나 Ticker 컬럼이 없을 경우를 대비해 방어적으로 생성
-        temp_df = screened_df.copy()
-        if 'Name' not in temp_df.columns:
-            temp_df['Name'] = temp_df['Ticker'] if 'Ticker' in temp_df.columns else "Unknown"
-        if 'Ticker' not in temp_df.columns:
-            temp_df['Ticker'] = "Unknown"
+        if 'Name' not in screened_df.columns:
+            screened_df['Name'] = screened_df['Ticker'] if 'Ticker' in screened_df.columns else "Unknown"
+        if 'Ticker' not in screened_df.columns:
+            screened_df['Ticker'] = "Unknown"
             
-        temp_df['DisplayName'] = temp_df['Name'].astype(str) + " (" + temp_df['Ticker'].astype(str) + ")"
+        screened_df['DisplayName'] = screened_df['Name'].astype(str) + " (" + screened_df['Ticker'].astype(str) + ")"
         
         # 1. 섹터별 분포 트리맵 (Top-Down View)
         st.markdown("#### 🏗️ 섹터별 점수 및 시총 분포")
         
         # 결측치 처리 (Plotly Treemap 오류 방지)
-        tree_df = temp_df.copy()
+        tree_df = screened_df.copy()
         required_vis_cols = ['Sector', 'MarketCap', 'FinalScore', 'PER', 'ROE', 'Momentum']
         for col in required_vis_cols:
             if col not in tree_df.columns:
