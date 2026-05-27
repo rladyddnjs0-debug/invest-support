@@ -957,17 +957,27 @@ elif menu == "🔍 종목 스크리너":
                 - 성장성: `{screener.weights[regime_choice]['growth']*100:.0f}%` / 모멘텀: `{screener.weights[regime_choice]['momentum']*100:.0f}%`
             """)
 
-        display_cols = ['Ticker', 'Name', 'Sector', 'FinalScore', 'PER', 'PBR', 'ROE', 'Momentum']
+        # 표시용 컬럼 안전하게 선택 (컬럼이 없을 경우를 대비)
+        available_cols = screened_df.columns.tolist()
+        requested_cols = ['Ticker', 'Name', 'Sector', 'FinalScore', 'PER', 'PBR', 'ROE', 'Momentum']
+        display_cols = [c for c in requested_cols if c in available_cols]
         
+        # 포맷팅할 컬럼들도 존재하는 것만 추려냄
+        format_dict = {
+            'FinalScore': '{:.1f}',
+            'PER': '{:.2f}',
+            'PBR': '{:.2f}',
+            'ROE': '{:.1f}%',
+            'Momentum': '{:+.1f}%'
+        }
+        actual_format = {k: v for k, v in format_dict.items() if k in display_cols}
+
         # 행 선택 기능이 통합된 데이터프레임
         event = st.dataframe(
-            screened_df[display_cols].style.format({
-                'FinalScore': '{:.1f}',
-                'PER': '{:.2f}',
-                'PBR': '{:.2f}',
-                'ROE': '{:.1f}%',
-                'Momentum': '{:+.1f}%'
-            }).background_gradient(subset=['FinalScore'], cmap='Greens').background_gradient(subset=['Momentum'], cmap='RdYlGn'),
+            screened_df[display_cols].style.format(actual_format).background_gradient(
+                subset=[c for c in ['FinalScore', 'Momentum'] if c in display_cols], 
+                cmap='RdYlGn'
+            ),
             width="stretch",
             column_config={
                 "FinalScore": st.column_config.NumberColumn("종합 점수", help="레짐별 가중치가 적용된 0~100점 사이의 최종 퀀트 점수입니다."),
