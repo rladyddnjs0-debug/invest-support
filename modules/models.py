@@ -294,12 +294,20 @@ class QuantScreener:
         if df.empty: return df
         
         # 1. 밸류 데이터 전처리 (적자 기업 및 결측치 처리)
-        # PER, PBR이 0 이하이거나 NaN이면 매우 높은 값을 할당하여 랭킹에서 불이익 부여
         df_clean = df.copy()
+        
+        # 필수 컬럼 존재 확인 및 수치화
+        required_cols = ['PER', 'PBR', 'ROE', 'Momentum', 'RevenueGrowth', 'ProfitMargin']
+        for col in required_cols:
+            if col not in df_clean.columns:
+                logger.warning(f"Column '{col}' missing in screening input. Filling with 0.")
+                df_clean[col] = 0.0
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0.0)
+
+        # PER, PBR 특수 처리 (낮을수록 좋음, 적자는 최하위)
         for col in ['PER', 'PBR']:
-            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
             # 0 이하(적자) 또는 NaN인 경우 해당 컬럼의 최대값 + 100 할당 (최하위 랭킹용)
-            mask = (df_clean[col] <= 0) | (df_clean[col].isna())
+            mask = (df_clean[col] <= 0)
             if mask.any():
                 max_val = df_clean.loc[~mask, col].max() if not df_clean.loc[~mask, col].empty else 100
                 df_clean.loc[mask, col] = max_val + 100
