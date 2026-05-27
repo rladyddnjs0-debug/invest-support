@@ -1075,23 +1075,36 @@ elif menu == "🔍 종목 스크리너":
         # 팩터별 분석 차트
         st.markdown("---")
         st.subheader("📈 다차원 시각화 분석")
-        # 종목 식별 개선: 이름 뒤에 티커 병기 (중복 방지, 구글 GOOGL/GOOG 대응)
-        screened_df['DisplayName'] = screened_df['Name'] + " (" + screened_df['Ticker'] + ")"
+        
+        # 종목 식별 개선: 이름 뒤에 티커 병기 (중복 방지)
+        # Name이나 Ticker 컬럼이 없을 경우를 대비해 방어적으로 생성
+        temp_df = screened_df.copy()
+        if 'Name' not in temp_df.columns:
+            temp_df['Name'] = temp_df['Ticker'] if 'Ticker' in temp_df.columns else "Unknown"
+        if 'Ticker' not in temp_df.columns:
+            temp_df['Ticker'] = "Unknown"
+            
+        temp_df['DisplayName'] = temp_df['Name'].astype(str) + " (" + temp_df['Ticker'].astype(str) + ")"
         
         # 1. 섹터별 분포 트리맵 (Top-Down View)
         st.markdown("#### 🏗️ 섹터별 점수 및 시총 분포")
         
         # 결측치 처리 (Plotly Treemap 오류 방지)
-        tree_df = screened_df.copy()
+        tree_df = temp_df.copy()
+        required_vis_cols = ['Sector', 'MarketCap', 'FinalScore', 'PER', 'ROE', 'Momentum']
+        for col in required_vis_cols:
+            if col not in tree_df.columns:
+                tree_df[col] = 0 if col != 'Sector' else 'Unknown Sector'
+            
         tree_df['Sector'] = tree_df['Sector'].fillna('Unknown Sector').replace('', 'Unknown Sector')
-        tree_df['MarketCap'] = tree_df['MarketCap'].fillna(0)
-        tree_df['FinalScore'] = tree_df['FinalScore'].fillna(0)
+        tree_df['MarketCap'] = pd.to_numeric(tree_df['MarketCap'], errors='coerce').fillna(0)
+        tree_df['FinalScore'] = pd.to_numeric(tree_df['FinalScore'], errors='coerce').fillna(0)
 
         fig_tree = px.treemap(tree_df, 
                              path=[px.Constant("Market"), 'Sector', 'DisplayName'], 
                              values='MarketCap',
                              color='FinalScore', 
-                             hover_data=['PER', 'ROE', 'Momentum'],
+                             hover_data=[c for c in ['PER', 'ROE', 'Momentum'] if c in tree_df.columns],
                              color_continuous_scale='RdYlGn',
                              title="섹터/종목별 점수 분포 (박스 크기: 시가총액)",
                              template="plotly_dark")
