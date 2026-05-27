@@ -1151,8 +1151,12 @@ elif menu == "🔍 종목 스크리너":
         
         # Plotly Express 데이터 전처리 (결측치 및 0 이하 값 처리)
         scatter_df = screened_df.copy()
-        for col in ['PER', 'ROE', 'MarketCap']:
-            scatter_df[col] = pd.to_numeric(scatter_df[col], errors='coerce').fillna(0)
+        for col in ['PER', 'ROE', 'MarketCap', 'Sector', 'DisplayName']:
+            if col not in scatter_df.columns:
+                scatter_df[col] = 0 if col != 'Sector' and col != 'DisplayName' else 'Unknown'
+            else:
+                if col in ['PER', 'ROE', 'MarketCap']:
+                    scatter_df[col] = pd.to_numeric(scatter_df[col], errors='coerce').fillna(0)
         
         # Plotly size 파라미터는 반드시 양수여야 함
         scatter_df['SizeDisplay'] = scatter_df['MarketCap'].apply(lambda x: max(x, 1e-6))
