@@ -25,6 +25,35 @@ reporter = AIReporter()
 screener = QuantScreener()
 backtester = QuantBacktester(loader)
 
+# --- 유틸리티 함수 ---
+import streamlit.components.v1 as components
+
+def tradingview_widget(symbol, height=400, interval="5"):
+    """TradingView Advanced Real-time Chart Widget"""
+    widget_html = f"""
+    <div class="tradingview-widget-container" style="height:{height}px;width:100%;">
+      <div id="tv_chart_{symbol.replace(':', '_')}" style="height:{height}px;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({{
+        "autosize": true,
+        "symbol": "{symbol}",
+        "interval": "{interval}",
+        "timezone": "Asia/Seoul",
+        "theme": "dark",
+        "style": "1",
+        "locale": "kr",
+        "toolbar_bg": "#f1f3f6",
+        "enable_publishing": false,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "container_id": "tv_chart_{symbol.replace(':', '_')}"
+      }});
+      </script>
+    </div>
+    """
+    components.html(widget_html, height=height)
+
 # --- 상세 분석 팝업 함수 ---
 @st.dialog("📊 종목 상세 분석", width="large")
 def show_stock_details(ticker):
@@ -209,6 +238,18 @@ if st.sidebar.button("🔍 종목 스크리너", width="stretch",
                      type="primary" if st.session_state.menu == "🔍 종목 스크리너" else "secondary"):
     st.session_state.menu = "🔍 종목 스크리너"
     st.session_state.active_ticker = None # 메뉴 이동 시 팝업 닫기
+    st.rerun()
+
+if st.sidebar.button("🚀 실시간 마켓 모니터", width="stretch",
+                     type="primary" if st.session_state.menu == "🚀 실시간 마켓 모니터" else "secondary"):
+    st.session_state.menu = "🚀 실시간 마켓 모니터"
+    st.session_state.active_ticker = None
+    st.rerun()
+
+if st.sidebar.button("🛠️ 관리자 시스템 로그", width="stretch",
+                     type="primary" if st.session_state.menu == "🛠️ 관리자 시스템 로그" else "secondary"):
+    st.session_state.menu = "🛠️ 관리자 시스템 로그"
+    st.session_state.active_ticker = None
     st.rerun()
 
 menu = st.session_state.menu
@@ -1266,6 +1307,106 @@ elif menu == "🔍 종목 스크리너":
                     st.error("백테스트를 위한 과거 데이터를 충분히 확보하지 못했습니다. (미국 주식은 티커가 너무 많아 시간이 소요될 수 있습니다)")
     else:
         st.error("데이터를 불러오지 못했습니다. 티커 설정을 확인해주세요.")
+
+elif menu == "🚀 실시간 마켓 모니터":
+    st.title("🚀 실시간 마켓 모니터 (5분봉)")
+    st.markdown("TradingView 실시간 엔진을 활용한 초정밀 시장 모니터링 보드입니다.")
+
+    # --- 1섹션: 지수 선물 (Futures) ---
+    st.subheader("📊 주요 지수 선물")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.info("나스닥 100 선물 (NQ)")
+        tradingview_widget("CME_MINI:NQ1!", height=450)
+    with col2:
+        st.info("S&P 500 선물 (ES)")
+        tradingview_widget("CME_MINI:ES1!", height=450)
+    with col3:
+        st.info("다우 30 선물 (YM)")
+        tradingview_widget("CBOT:YM1!", height=450)
+
+    # --- 2섹션: 매크로 및 공포 지수 ---
+    st.markdown("---")
+    st.subheader("🌐 실시간 매크로 & 공포 지수")
+    col4, col5, col6 = st.columns(3)
+
+    with col4:
+        st.warning("미국채 10년물 수익률 (10Y)")
+        tradingview_widget("TVC:US10Y", height=400)
+    with col5:
+        st.warning("미국채 2년물 수익률 (2Y)")
+        tradingview_widget("TVC:US02Y", height=400)
+    with col6:
+        st.error("변동성 지수 (VIX)")
+        tradingview_widget("CBOE:VIX", height=400)
+
+    # --- 3섹션: 통화 및 원자재 ---
+    st.markdown("---")
+    st.subheader("💱 외환 및 핵심 지표")
+    col7, col8, col9 = st.columns(3)
+
+    with col7:
+        st.success("원/달러 환율 (USDKRW)")
+        tradingview_widget("FX_IDC:USDKRW", height=400)
+    with col8:
+        st.success("달러 인덱스 (DXY)")
+        tradingview_widget("TVC:DXY", height=400)
+    with col9:
+        st.success("비트코인 (BTC/USD)")
+        tradingview_widget("BINANCE:BTCUSDT", height=400)
+
+elif menu == "🛠️ 관리자 시스템 로그":
+    st.title("📋 시스템 로그 관리자")
+    
+    # 로그 디렉토리 설정
+    log_dir = "logs"
+    log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".log")], reverse=True) if os.path.exists(log_dir) else []
+
+    if not log_files:
+        st.info("기록된 로그 파일이 없습니다.")
+    else:
+        # 파일 선택 및 검색 인터페이스
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            selected_log = st.selectbox("로그 파일 선택", log_files)
+        with col2:
+            search_query = st.text_input("🔍 로그 검색 (키워드)", "")
+
+        log_path = os.path.join(log_dir, selected_log)
+
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                
+                # 검색 필터링
+                if search_query:
+                    filtered_lines = [line for line in lines if search_query.lower() in line.lower()]
+                    st.caption(f"검색 결과: {len(filtered_lines)}개 / 전체 {len(lines)}개")
+                else:
+                    filtered_lines = lines
+                
+                # 정렬 및 출력
+                sort_order = st.radio("정렬 순서", ["최신순", "과거순"], horizontal=True)
+                display_lines = filtered_lines[::-1] if sort_order == "최신순" else filtered_lines
+
+                if not display_lines:
+                    st.warning("조건에 맞는 로그가 없습니다.")
+                else:
+                    max_display = 500
+                    display_text = "".join(display_lines[:max_display])
+                    if len(display_lines) > max_display:
+                        st.info(f"표시 제한: 상위 {max_display}줄만 표시됩니다.")
+                    st.code(display_text, language="log")
+
+                if st.button("🗑️ 현재 로그 파일 삭제"):
+                    os.remove(log_path)
+                    st.success("삭제되었습니다.")
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"로그 읽기 오류: {e}")
 
 st.markdown("---")
 
