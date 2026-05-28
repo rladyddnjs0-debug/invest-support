@@ -1334,13 +1334,13 @@ elif menu == "🚀 실시간 마켓 모니터":
 
     with col4:
         st.warning("미국채 10년물 수익률 (10Y)")
-        tradingview_widget("CAPITALCOM:US10Y", height=400)
+        tradingview_widget("CURRENCYCOM:US10Y", height=400)
     with col5:
         st.warning("미국채 2년물 수익률 (2Y)")
-        tradingview_widget("CAPITALCOM:US02Y", height=400)
+        tradingview_widget("CURRENCYCOM:US02Y", height=400)
     with col6:
         st.error("변동성 지수 (VIX)")
-        tradingview_widget("CAPITALCOM:VIX", height=400)
+        tradingview_widget("TVC:VIX", height=400)
 
     # --- 3섹션: 통화 및 원자재 ---
     st.markdown("---")
