@@ -1318,14 +1318,14 @@ elif menu == "🚀 실시간 마켓 모니터":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.info("나스닥 100 선물 (NQ)")
-        tradingview_widget("CME_MINI:NQ1!", height=450)
+        st.info("나스닥 100 (US100)")
+        tradingview_widget("CAPITALCOM:US100", height=450)
     with col2:
-        st.info("S&P 500 선물 (ES)")
-        tradingview_widget("CME_MINI:ES1!", height=450)
+        st.info("S&P 500 (US500)")
+        tradingview_widget("CAPITALCOM:US500", height=450)
     with col3:
-        st.info("다우 30 선물 (YM)")
-        tradingview_widget("CBOT:YM1!", height=450)
+        st.info("다우 30 (US30)")
+        tradingview_widget("CAPITALCOM:US30", height=450)
 
     # --- 2섹션: 매크로 및 공포 지수 ---
     st.markdown("---")
@@ -1340,7 +1340,7 @@ elif menu == "🚀 실시간 마켓 모니터":
         tradingview_widget("TVC:US02Y", height=400)
     with col6:
         st.error("변동성 지수 (VIX)")
-        tradingview_widget("CBOE:VIX", height=400)
+        tradingview_widget("TVC:VIX", height=400)
 
     # --- 3섹션: 통화 및 원자재 ---
     st.markdown("---")
@@ -1352,7 +1352,7 @@ elif menu == "🚀 실시간 마켓 모니터":
         tradingview_widget("FX_IDC:USDKRW", height=400)
     with col8:
         st.success("달러 인덱스 (DXY)")
-        tradingview_widget("TVC:DXY", height=400)
+        tradingview_widget("CAPITALCOM:DXY", height=400)
     with col9:
         st.success("비트코인 (BTC/USD)")
         tradingview_widget("BINANCE:BTCUSDT", height=400)
