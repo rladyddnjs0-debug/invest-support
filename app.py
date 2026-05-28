@@ -1334,13 +1334,13 @@ elif menu == "🚀 실시간 마켓 모니터":
 
     with col4:
         st.warning("미국채 10년물 수익률 (10Y)")
-        tradingview_widget("CURRENCYCOM:US10Y", height=400)
+        tradingview_widget("OANDA:USB10YUSD", height=400)
     with col5:
         st.warning("미국채 2년물 수익률 (2Y)")
-        tradingview_widget("CURRENCYCOM:US02Y", height=400)
+        tradingview_widget("OANDA:USB02YUSD", height=400)
     with col6:
         st.error("변동성 지수 (VIX)")
-        tradingview_widget("TVC:VIX", height=400)
+        tradingview_widget("FOREXCOM:VIX", height=400)
 
     # --- 3섹션: 통화 및 원자재 ---
     st.markdown("---")
@@ -1352,7 +1352,7 @@ elif menu == "🚀 실시간 마켓 모니터":
         tradingview_widget("FX_IDC:USDKRW", height=400)
     with col8:
         st.success("달러 인덱스 (DXY)")
-        tradingview_widget("CAPITALCOM:DXY", height=400)
+        tradingview_widget("FOREXCOM:DXY", height=400)
     with col9:
         st.success("비트코인 (BTC/USD)")
         tradingview_widget("BINANCE:BTCUSDT", height=400)
