@@ -43,7 +43,7 @@ class DataLoader:
             
         self.tickers = {
             "S&P500": "^GSPC", "NASDAQ": "^IXIC", "KOSPI": "^KS11", "KOSDAQ": "^KQ11",
-            "US10Y": "^TNX", "US2Y": "^IRX", "DXY": "DX-Y.NYB", "GOLD": "GC=F",
+            "US10Y": "^TNX", "US2Y": "^IRX", "US30Y": "^TYX", "DXY": "DX-Y.NYB", "GOLD": "GC=F",
             "OIL": "CL=F", "TIP": "TIP", "IEF": "IEF", "USD_KRW": "USDKRW=X",
             "BTC": "BTC-USD", "VIX": "^VIX", "HYG": "HYG"
         }

@@ -408,9 +408,9 @@ if menu == "🌍 시장 지수 분석":
             st.plotly_chart(fig, width="stretch")
 
             if spread is not None:
-                st.subheader("📉 매크로 지표: 미국 국채 장단기 금리차", help="장기 금리와 단기 금리의 차이를 통해 경기 순환 국면을 판단합니다.")
+                st.subheader("📉 글로벌 매크로 가이드: 미국 국채 금리 및 장단기 스프레드", help="장기 금리와 단기 금리의 차이 및 각 만기별 금리 추이를 통해 경기 순환 국면을 판단합니다.")
                 
-                with st.expander("📖 장단기 금리차 분석 상세 가이드 (필독)", expanded=False):
+                with st.expander("📖 매크로 지표 분석 상세 가이드 (필독)", expanded=False):
                     st.markdown("""
                     **1. 수익률 곡선(Yield Curve)의 의미**
                     통상 장기 금리는 미래 위험을 반영해 단기 금리보다 높습니다. 하지만 경기 침체 우려가 커지면 단기 금리가 더 높아지는 '역전' 현상이 발생합니다.
@@ -420,39 +420,66 @@ if menu == "🌍 시장 지수 분석":
                     - **⚠️ 평탄화 (Flattening, 0 ~ 0.5%)**: 성장 둔화의 초기 신호입니다. 금리 인상기나 경기 정점에서 관찰됩니다.
                     - **🚨 역전 (Inverted, < 0%)**: 강력한 경기 침체 예고 지표입니다. 역사적으로 역전 후 12~18개월 내에 침체가 발생했습니다.
                     
-                    **3. 매크로 모멘텀**
-                    - **Steepening (개선)**: 금리차가 다시 벌어지는 현상. 경기 회복의 신호일 수 있습니다.
-                    - **Flattening (악화)**: 금리차가 좁혀지는 현상. 리스크 관리가 필요한 시점입니다.
+                    **3. 만기별 금리의 의미**
+                    - **2년물 (단기)**: 중앙은행의 통화 정책(금리 인상/인하)에 가장 민감하게 반응합니다.
+                    - **10년물 (중기)**: 시장의 미래 성장성과 인플레이션 기대를 반영하는 벤치마크 금리입니다.
+                    - **30년물 (장기)**: 초장기 성장 전망과 보험/연금 등 장기 자본의 수요를 반영합니다.
                     """)
                 
-                # 매크로 상세 메트릭
+                # 데이터 수집
+                us2y = loader.get_market_history("US2Y", period="5y")
+                us10y = loader.get_market_history("US10Y", period="5y")
+                us30y = loader.get_market_history("US30Y", period="5y")
+                
+                m1, m2, m3 = st.columns(3)
+                
+                # 현재 스프레드 및 매크로 상태 (10Y-2Y 기준)
                 curr_spread = spread['Spread'].iloc[-1]
                 prev_spread = spread['Spread'].iloc[-20] if len(spread) >= 20 else spread['Spread'].iloc[0]
                 spread_change = curr_spread - prev_spread
                 
-                m1, m2, m3 = st.columns(3)
-                
-                # 상태 판단
                 if curr_spread < 0:
-                    spread_status = "🚨 수익률 곡선 역전 (Inverted)"
-                    status_help = "단기 금리가 장기 금리보다 높은 상태로, 역사적으로 12~18개월 내 경기 침체가 발생할 확률이 매우 높음을 시사합니다."
+                    spread_status = "🚨 수익률 곡선 역전"
+                    status_color = "inverse"
                 elif curr_spread < 0.5:
-                    spread_status = "⚠️ 곡선 평탄화 (Flattening)"
-                    status_help = "금리차가 좁혀지고 있으며, 시장이 미래 성장 가능성을 낮게 보고 있음을 의미합니다."
+                    spread_status = "⚠️ 곡선 평탄화"
+                    status_color = "off"
                 else:
-                    spread_status = "✅ 정상 (Normal)"
-                    status_help = "장기 금리가 단기 금리보다 높은 건강한 상태입니다."
+                    spread_status = "✅ 정상 추세"
+                    status_color = "normal"
 
-                m1.metric("현재 스프레드 (10Y-2Y/3M)", f"{curr_spread:.3f}%", f"{spread_change:+.3f}% (MoM)",
-                         help="10년물 금리와 단기물 금리의 차이입니다. 현재 값이 0 이하인지가 핵심 관전 포인트입니다.")
-                m2.metric("매크로 상태", spread_status, help=status_help)
-                m3.metric("매크로 모멘텀", "개선 중" if spread_change > 0 else "악화 중",
-                         help="최근 1개월간 금리차가 확대(개선)되고 있는지, 축소(악화)되고 있는지 나타냅니다.")
-
-                fig_spread = go.Figure()
-                fig_spread.add_trace(go.Scatter(x=spread.index, y=spread['Spread'], fill='tozeroy', name='Yield Spread', line=dict(color='#00ffcc')))
-                fig_spread.add_hline(y=0, line_color="red", line_dash="dash")
-                fig_spread.update_layout(template="plotly_dark", height=300, margin=dict(l=20, r=20, t=10, b=10))
+                m1.metric("장단기 금리차 (10Y-2Y)", f"{curr_spread:.3f}%", f"{spread_change:+.3f}% (MoM)")
+                m2.metric("매크로 상태", spread_status)
+                m3.metric("매크로 모멘텀", "개선 중" if spread_change > 0 else "악화 중")
+                
+                # 만기별 현재 금리 표시
+                st.markdown("#### 🏛️ 미국 국채 만기별 현재 수익률")
+                y1, y2, y3 = st.columns(3)
+                if us2y is not None:
+                    y1.metric("US 2Y (단기)", f"{us2y['Close'].iloc[-1]:.3f}%", f"{us2y['Close'].iloc[-1] - us2y['Close'].iloc[-20]:+.3f}%")
+                if us10y is not None:
+                    y2.metric("US 10Y (중기)", f"{us10y['Close'].iloc[-1]:.3f}%", f"{us10y['Close'].iloc[-1] - us10y['Close'].iloc[-20]:+.3f}%")
+                if us30y is not None:
+                    y3.metric("US 30Y (장기)", f"{us30y['Close'].iloc[-1]:.3f}%", f"{us30y['Close'].iloc[-1] - us30y['Close'].iloc[-20]:+.3f}%")
+                
+                # 금리 추이 통합 차트
+                fig_yields = go.Figure()
+                if us2y is not None:
+                    fig_yields.add_trace(go.Scatter(x=us2y.index, y=us2y['Close'], name='US 2Y', line=dict(color='#00d1b2')))
+                if us10y is not None:
+                    fig_yields.add_trace(go.Scatter(x=us10y.index, y=us10y['Close'], name='US 10Y', line=dict(color='#3273dc')))
+                if us30y is not None:
+                    fig_yields.add_trace(go.Scatter(x=us30y.index, y=us30y['Close'], name='US 30Y', line=dict(color='#ff3860')))
+                
+                fig_yields.update_layout(title="미국 국채 만기별 금리 추이 (5년)", template="plotly_dark", height=400, 
+                                        margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                st.plotly_chart(fig_yields, width="stretch")
+                
+                # 금리차 차트 (별도 표시)
+                fig_spread = px.area(spread, x=spread.index, y='Spread', title="장단기 금리차 (10Y-2Y) 추이", 
+                                    template="plotly_dark", height=300, color_discrete_sequence=['#ffdd57'])
+                fig_spread.add_hline(y=0, line_dash="dash", line_color="red")
+                fig_spread.update_layout(margin=dict(l=10, r=10, t=40, b=10))
                 st.plotly_chart(fig_spread, width="stretch")
 
                 # --- 글로벌 매크로 4대 지표 (DXY, BEI, Gold, Oil) ---
