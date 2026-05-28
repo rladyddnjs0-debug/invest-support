@@ -426,41 +426,55 @@ if menu == "🌍 시장 지수 분석":
                     - **30년물 (장기)**: 초장기 성장 전망과 보험/연금 등 장기 자본의 수요를 반영합니다.
                     """)
                 
-                # 데이터 수집
-                us2y = loader.get_market_history("US2Y", period="5y")
-                us10y = loader.get_market_history("US10Y", period="5y")
-                us30y = loader.get_market_history("US30Y", period="5y")
+                # 뷰 선택 (장기 vs 인트라데이)
+                view_col1, view_col2 = st.columns([1, 2])
+                with view_col1:
+                    yield_view = st.radio("보기 설정", ["장기 추세 (5년)", "실시간 추세 (5분봉)"], horizontal=True, key="yield_view_radio")
+                
+                # 데이터 수집 (선택된 뷰에 따라)
+                if yield_view == "장기 추세 (5년)":
+                    u_period, u_interval = "5y", "1d"
+                    u_title_suffix = "(5년)"
+                else:
+                    u_period, u_interval = "1d", "5m"
+                    u_title_suffix = "(5분봉)"
+                
+                with st.spinner(f"미국채 {u_title_suffix} 데이터 로드 중..."):
+                    us2y = loader.get_market_history("US2Y", period=u_period, interval=u_interval)
+                    us10y = loader.get_market_history("US10Y", period=u_period, interval=u_interval)
+                    us30y = loader.get_market_history("US30Y", period=u_period, interval=u_interval)
                 
                 m1, m2, m3 = st.columns(3)
                 
                 # 현재 스프레드 및 매크로 상태 (10Y-2Y 기준)
+                # 스프레드 데이터는 항상 1일 단위 기반으로 계산된 것을 사용 (안정성)
                 curr_spread = spread['Spread'].iloc[-1]
                 prev_spread = spread['Spread'].iloc[-20] if len(spread) >= 20 else spread['Spread'].iloc[0]
                 spread_change = curr_spread - prev_spread
                 
                 if curr_spread < 0:
                     spread_status = "🚨 수익률 곡선 역전"
-                    status_color = "inverse"
                 elif curr_spread < 0.5:
                     spread_status = "⚠️ 곡선 평탄화"
-                    status_color = "off"
                 else:
                     spread_status = "✅ 정상 추세"
-                    status_color = "normal"
 
                 m1.metric("장단기 금리차 (10Y-2Y)", f"{curr_spread:.3f}%", f"{spread_change:+.3f}% (MoM)")
                 m2.metric("매크로 상태", spread_status)
                 m3.metric("매크로 모멘텀", "개선 중" if spread_change > 0 else "악화 중")
                 
                 # 만기별 현재 금리 표시
-                st.markdown("#### 🏛️ 미국 국채 만기별 현재 수익률")
+                st.markdown(f"#### 🏛️ 미국 국채 만기별 현재 수익률 {u_title_suffix}")
                 y1, y2, y3 = st.columns(3)
                 if us2y is not None:
-                    y1.metric("US 2Y (단기)", f"{us2y['Close'].iloc[-1]:.3f}%", f"{us2y['Close'].iloc[-1] - us2y['Close'].iloc[-20]:+.3f}%")
+                    y2_change = us2y['Close'].iloc[-1] - us2y['Close'].iloc[-2] if len(us2y) > 1 else 0
+                    y1.metric("US 2Y (단기)", f"{us2y['Close'].iloc[-1]:.3f}%", f"{y2_change:+.3f}%")
                 if us10y is not None:
-                    y2.metric("US 10Y (중기)", f"{us10y['Close'].iloc[-1]:.3f}%", f"{us10y['Close'].iloc[-1] - us10y['Close'].iloc[-20]:+.3f}%")
+                    y10_change = us10y['Close'].iloc[-1] - us10y['Close'].iloc[-2] if len(us10y) > 1 else 0
+                    y2.metric("US 10Y (중기)", f"{us10y['Close'].iloc[-1]:.3f}%", f"{y10_change:+.3f}%")
                 if us30y is not None:
-                    y3.metric("US 30Y (장기)", f"{us30y['Close'].iloc[-1]:.3f}%", f"{us30y['Close'].iloc[-1] - us30y['Close'].iloc[-20]:+.3f}%")
+                    y30_change = us30y['Close'].iloc[-1] - us30y['Close'].iloc[-2] if len(us30y) > 1 else 0
+                    y3.metric("US 30Y (장기)", f"{us30y['Close'].iloc[-1]:.3f}%", f"{y30_change:+.3f}%")
                 
                 # 금리 추이 통합 차트
                 fig_yields = go.Figure()
@@ -471,7 +485,7 @@ if menu == "🌍 시장 지수 분석":
                 if us30y is not None:
                     fig_yields.add_trace(go.Scatter(x=us30y.index, y=us30y['Close'], name='US 30Y', line=dict(color='#ff3860')))
                 
-                fig_yields.update_layout(title="미국 국채 만기별 금리 추이 (5년)", template="plotly_dark", height=400, 
+                fig_yields.update_layout(title=f"미국 국채 만기별 금리 추이 {u_title_suffix}", template="plotly_dark", height=400, 
                                         margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig_yields, width="stretch")
                 

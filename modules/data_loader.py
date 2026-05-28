@@ -281,27 +281,27 @@ class DataLoader:
 
     def get_market_history(self, name, period="5y", interval="1d", force_download=False):
         ticker_symbol = self.tickers.get(name, name)
-        file_path = os.path.join(self.data_dir, f"{name.lower().replace('/', '_')}_history.csv")
+        # 인터벌에 따라 캐시 파일명 분리 (데이터 정합성 유지)
+        file_path = os.path.join(self.data_dir, f"{name.lower().replace('/', '_')}_{interval}_history.csv")
         
         should_download = force_download
         if not os.path.exists(file_path):
             should_download = True
         else:
-            # 파일이 오늘 생성되지 않았거나, 데이터가 너무 짧으면 다운로드 검토
             file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
-            if file_mtime.date() != datetime.now().date():
-                should_download = True
-            else:
-                # 오늘 생성된 파일이라도, 기간이 "max"인데 데이터가 적으면 재다운로드
-                df_cached = pd.read_csv(file_path, index_col=0, parse_dates=True)
-                if period == "max" and len(df_cached) < 1000: # 대략적인 임계값
+            # 인트라데이 데이터(1d 미만)는 1시간마다 갱신, 일간 데이터는 하루마다 갱신
+            if "m" in interval or "h" in interval:
+                if (datetime.now() - file_mtime).seconds > 3600: # 1 hour
                     should_download = True
-                else:
-                    return df_cached
+            elif file_mtime.date() != datetime.now().date():
+                should_download = True
+            
+            if not should_download:
+                return pd.read_csv(file_path, index_col=0, parse_dates=True)
 
         if should_download:
             try:
-                logger.info(f"Downloading historical data for {ticker_symbol} ({period})...")
+                logger.info(f"Downloading historical data for {ticker_symbol} (period={period}, interval={interval})...")
                 data = yf.download(ticker_symbol, period=period, interval=interval)
                 if not data.empty:
                     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
