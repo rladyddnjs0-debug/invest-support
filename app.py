@@ -1410,7 +1410,7 @@ elif menu == "💎 펀더멘털 가치평가":
                             
                             # 1. 주가 라인 (배경)
                             fig_val.add_trace(go.Scatter(x=hist_data.index, y=hist_data['Close'], 
-                                                       name='Price', line=dict(color='white', width=1.5, opacity=0.7)))
+                                                       name='Price', line=dict(color='white', width=1.5), opacity=0.7))
                             
                             # 2. 밸류에이션 밴드 (가로선 및 영역)
                             # Bear (초록 - 지지선), Base (파랑 - 적정), Bull (빨강 - 저항선)
