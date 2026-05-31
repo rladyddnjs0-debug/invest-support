@@ -1375,6 +1375,8 @@ elif menu == "💎 펀더멘털 가치평가":
         # 데이터 로드
         with st.spinner('종목별 펀더멘털 데이터 수집 중...'):
             fund_df = loader.get_stock_fundamentals(tickers, market_name="us", force_download=force_refresh)
+            if force_refresh:
+                st.success("최신 데이터로 갱신되었습니다!")
             
         if fund_df is not None and not fund_df.empty:
             found_count = 0

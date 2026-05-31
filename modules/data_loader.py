@@ -110,13 +110,19 @@ class DataLoader:
         cache_file = f"{market_name}_fundamentals.csv"
         cache_path = os.path.join(self.data_dir, cache_file)
         
+        # force_download가 True이면 캐시를 무시하고 진행
         if not force_download and os.path.exists(cache_path):
             file_mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
             if (datetime.now() - file_mtime).days < self.config.cache_expiry_days:
                 df_cache = pd.read_csv(cache_path)
+                # 요청한 티커들이 캐시에 모두 포함되어 있는지 확인
                 if set(tickers).issubset(set(df_cache['Ticker'].astype(str).tolist())):
+                    logger.info(f"Using cached {market_name} fundamentals from {cache_path}")
                     return df_cache[df_cache['Ticker'].isin(tickers)]
 
+        if force_download:
+            logger.info(f"Force refreshing {market_name} fundamentals...")
+        
         fundamental_data = []
         if market_name == "kr":
             try:
