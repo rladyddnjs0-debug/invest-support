@@ -160,6 +160,42 @@ def show_stock_details(ticker):
                     st.session_state[f"lppl_{ticker}"] = engine.run_lppl_fit(prices)
                     st.rerun() # Fragment만 리런
 
+            # --- Milestone 01: 펀더멘털 시나리오 분석 ---
+            st.markdown("---")
+            st.write("#### 💎 펀더멘털 가치 평가")
+            
+            # 관심 종목에 대한 시나리오 계산
+            fund_df = loader.get_stock_fundamentals([ticker], market_name="us" if ".KS" not in ticker and ".KQ" not in ticker else "kr")
+            if not fund_df.empty:
+                row = fund_df.iloc[0]
+                fwd_eps = row.get('ForwardEPS', 0)
+                curr_price = row.get('Price', 0)
+                
+                scenarios = engine.calculate_valuation_scenarios(ticker, fwd_eps, curr_price)
+                if scenarios:
+                    s = scenarios['scenarios']
+                    pos = scenarios['position_pct']
+                    
+                    st.write(f"**현재 위치: {pos:.1f}% (Bear ↔ Bull)**")
+                    # 프로그레스 바 형태로 위치 시각화
+                    st.progress(pos / 100.0)
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Bear", f"{s['bear']:,.1f}")
+                    c2.metric("Base", f"{s['base']:,.1f}")
+                    c3.metric("Bull", f"{s['bull']:,.1f}")
+                    
+                    st.caption(f"12M Forward EPS: {fwd_eps:,.2f} 기준")
+                    
+                    if curr_price <= s['bear']:
+                        st.success("🎯 **매수 기회:** 주가가 Bear Case 이하로 저평가 상태입니다.")
+                    elif curr_price >= s['bull']:
+                        st.error("🚫 **매수 금지:** 주가가 Bull Case 이상으로 고평가 상태입니다.")
+                else:
+                    st.info("해당 종목의 밸류에이션 매트릭스 정보가 없습니다.")
+            else:
+                st.info("재무 데이터를 불러올 수 없습니다.")
+
         st.markdown("---")
         # 뉴스 섹션
         st.subheader("📰 최근 소식 및 AI 분석")
@@ -239,6 +275,12 @@ if st.sidebar.button("🔍 종목 스크리너", width="stretch",
                      type="primary" if st.session_state.menu == "🔍 종목 스크리너" else "secondary"):
     st.session_state.menu = "🔍 종목 스크리너"
     st.session_state.active_ticker = None # 메뉴 이동 시 팝업 닫기
+    st.rerun()
+
+if st.sidebar.button("💎 펀더멘털 가치평가", width="stretch",
+                     type="primary" if st.session_state.menu == "💎 펀더멘털 가치평가" else "secondary"):
+    st.session_state.menu = "💎 펀더멘털 가치평가"
+    st.session_state.active_ticker = None
     st.rerun()
 
 if st.sidebar.button("🚀 실시간 마켓 모니터", width="stretch",
@@ -1308,6 +1350,62 @@ elif menu == "🔍 종목 스크리너":
                     st.error("백테스트를 위한 과거 데이터를 충분히 확보하지 못했습니다. (미국 주식은 티커가 너무 많아 시간이 소요될 수 있습니다)")
     else:
         st.error("데이터를 불러오지 못했습니다. 티커 설정을 확인해주세요.")
+
+elif menu == "💎 펀더멘털 가치평가":
+    st.title("💎 펀더멘털 가치평가 (Scenario Analysis)")
+    st.markdown("""
+    설정된 **가치평가 매트릭스**를 바탕으로, 주요 종목의 적정 주가 밴드와 현재 위치를 정량적으로 분석합니다.
+    - **Bear**: 하락 시나리오에서의 강력한 지지선 (보수적 멀티플 적용)
+    - **Base**: 현재 펀더멘털과 시장 평균을 반영한 적정가
+    - **Bull**: 성장 가속 및 낙관적 시장 환경에서의 목표가
+    """)
+    
+    # 관심 종목 리스트 (matrix에 정의된 종목들)
+    tickers = list(engine.valuation_matrix.keys())
+    
+    if not tickers:
+        st.warning("설정된 가치평가 종목이 없습니다. `config/valuation_matrix.json`을 확인해주세요.")
+    else:
+        # 데이터 로드
+        with st.spinner('종목별 펀더멘털 데이터 수집 중...'):
+            fund_df = loader.get_stock_fundamentals(tickers, market_name="us") # 주요 종목은 대부분 미국 시장
+            
+        if not fund_df.empty:
+            for i, ticker in enumerate(tickers):
+                row = fund_df[fund_df['Ticker'] == ticker]
+                if not row.empty:
+                    row = row.iloc[0]
+                    fwd_eps = row.get('ForwardEPS', 0)
+                    curr_price = row.get('Price', 0)
+                    
+                    scenarios = engine.calculate_valuation_scenarios(ticker, fwd_eps, curr_price)
+                    if scenarios:
+                        s = scenarios['scenarios']
+                        pos = scenarios['position_pct']
+                        
+                        st.markdown(f"### {scenarios['ticker_name']} ({ticker})")
+                        
+                        # 3분할 표시
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Bear Case", f"${s['bear']:,.1f}", help="보수적 시나리오 주가")
+                        m2.metric("Base Case", f"${s['base']:,.1f}", help="중립 시나리오 주가")
+                        m3.metric("Bull Case", f"${s['bull']:,.1f}", help="낙관적 시나리오 주가")
+                        
+                        # 현재가 위치 시각화
+                        st.write(f"현재가: **${curr_price:,.2f}** (밴드 내 위치: **{pos:.1f}%**)")
+                        
+                        # 진행 바 (Bear=0, Bull=100)
+                        bar_color = "green" if pos < 30 else "orange" if pos < 70 else "red"
+                        st.progress(min(max(pos/100.0, 0.0), 1.0))
+                        
+                        if curr_price <= s['bear']:
+                            st.success(f"🎯 **매수 기회:** {ticker}가 Bear Case 이하의 매력적인 가격대에 진입했습니다.")
+                        elif curr_price >= s['bull']:
+                            st.error(f"🚫 **주의:** {ticker}가 Bull Case 이상의 고평가 영역에 위치해 있습니다.")
+                            
+                        st.markdown("---")
+        else:
+            st.error("종목 데이터를 불러오는 데 실패했습니다.")
 
 elif menu == "🚀 실시간 마켓 모니터":
     st.title("🚀 실시간 마켓 모니터 (5분봉)")
