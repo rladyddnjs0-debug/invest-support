@@ -206,7 +206,9 @@ class DataLoader:
                             'ProfitMargin': info.get('profitMargins', 0) * 100,
                             'RevenueGrowth': info.get('revenueGrowth', 0) * 100,
                             'MarketCap': info.get('marketCap', 0),
-                            'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100)
+                            'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
+                            'ForwardEPS': info.get('forwardEps', 0),
+                            'TrailingEPS': info.get('trailingEps', 0)
                         }
                         with lock: fundamental_data.append(data); count += 1
                     except Exception as e:
@@ -247,7 +249,9 @@ class DataLoader:
                         'PER': info.get('trailingPE', 0), 'PBR': info.get('priceToBook', 0),
                         'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
                         'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
-                        'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100)
+                        'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
+                        'ForwardEPS': info.get('forwardEps', 0),
+                        'TrailingEPS': info.get('trailingEps', 0)
                     }
                     with lock: fundamental_data.append(data); count += 1
                 except Exception as e:

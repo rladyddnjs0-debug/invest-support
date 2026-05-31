@@ -1,3 +1,5 @@
+import os
+import json
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
@@ -11,6 +13,55 @@ class AnalysisModel:
         self.attr_config = settings.attractiveness
         self.port_config = settings.portfolio
         self.lppl_engine = LPPLEngine(num_iterations=self.config.num_iterations)
+        self.valuation_matrix = self._load_valuation_matrix()
+
+    def _load_valuation_matrix(self):
+        matrix_path = os.path.join("config", "valuation_matrix.json")
+        if os.path.exists(matrix_path):
+            try:
+                with open(matrix_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Error loading valuation matrix: {e}")
+        return {}
+
+    def calculate_valuation_scenarios(self, ticker, forward_eps, current_price):
+        """
+        펀더멘털 시나리오 기반 적정 주가 및 밴드 산출.
+        (Milestone 01: Fundamentals)
+        """
+        clean_ticker = ticker.split('.')[0] # .KS 등 제거
+        matrix = self.valuation_matrix.get(clean_ticker) or self.valuation_matrix.get(ticker)
+        
+        if not matrix or forward_eps <= 0:
+            return None
+            
+        multiples = matrix['multiples']
+        scenarios = {
+            'bull': forward_eps * multiples['bull'],
+            'base': forward_eps * multiples['base'],
+            'bear': forward_eps * multiples['bear']
+        }
+        
+        # 현재가 위치 계산 (%)
+        # Bear(0%) ~ Base(50%) ~ Bull(100%) 로 정규화
+        if scenarios['bull'] > scenarios['bear']:
+            if current_price <= scenarios['bear']:
+                position_pct = 0.0
+            elif current_price >= scenarios['bull']:
+                position_pct = 100.0
+            else:
+                # Bear ~ Bull 사이의 위치 (선형 보간)
+                position_pct = (current_price - scenarios['bear']) / (scenarios['bull'] - scenarios['bear']) * 100
+        else:
+            position_pct = 50.0
+
+        return {
+            'scenarios': scenarios,
+            'current_price': current_price,
+            'position_pct': position_pct,
+            'ticker_name': matrix.get('name', ticker)
+        }
 
     def lppl_func(self, t, A, B, tc, m, C, omega, phi):
         """LPPL 표준 수식 (수학적 정합성 강화)"""

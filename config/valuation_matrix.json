@@ -1,0 +1,38 @@
+{
+    "NVDA": {
+        "name": "NVIDIA",
+        "multiples": {
+            "bull": 60.0,
+            "base": 42.0,
+            "bear": 30.0
+        },
+        "description": "AI infrastructure leader with high growth expectations."
+    },
+    "GOOGL": {
+        "name": "Alphabet Class A",
+        "multiples": {
+            "bull": 30.0,
+            "base": 23.0,
+            "bear": 18.0
+        },
+        "description": "Dominant search engine with strong AI integration and cloud growth."
+    },
+    "AAPL": {
+        "name": "Apple Inc.",
+        "multiples": {
+            "bull": 35.0,
+            "base": 28.0,
+            "bear": 22.0
+        },
+        "description": "Consumer ecosystem leader with consistent buybacks and service growth."
+    },
+    "MSFT": {
+        "name": "Microsoft",
+        "multiples": {
+            "bull": 40.0,
+            "base": 32.0,
+            "bear": 26.0
+        },
+        "description": "Enterprise cloud and AI software powerhouse."
+    }
+}
