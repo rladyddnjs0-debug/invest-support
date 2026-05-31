@@ -5,6 +5,7 @@ import concurrent.futures
 import threading
 import requests
 import time
+import random
 from datetime import datetime, timedelta
 from pykrx import stock as krx_stock
 from abc import ABC, abstractmethod
@@ -169,8 +170,11 @@ class DataLoader:
                 pass
 
         if not fundamental_data or market_name == "us":
-            logger.info(f"Downloading US fundamentals for {len(tickers)} tickers: {tickers}")
+            logger.info(f"Downloading US fundamentals for {len(tickers)} tickers")
             try:
+                # 50개 이상의 종목인 경우 지연 방지를 위해 batch download만 수행 (info 제외)
+                # 단, 소량 종목(밸류에이션용)인 경우 정밀 분석 수행
+                is_large_batch = len(tickers) > 50
                 batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
             except Exception as e:
                 logger.error(f"Batch yfinance download failed: {e}")
@@ -180,9 +184,9 @@ class DataLoader:
             
             def fetch_single_ticker(ticker):
                 nonlocal count; curr_price = 0; mom = 0
-                # 기존 데이터 백업
                 old_row = df_old_cache[df_old_cache['Ticker'] == ticker].iloc[0] if not df_old_cache.empty and ticker in df_old_cache['Ticker'].values else None
                 
+                # 1. 가격 및 모멘텀 (Batch Data 활용)
                 try:
                     if not batch_data.empty:
                         if isinstance(batch_data.columns, pd.MultiIndex):
@@ -199,33 +203,59 @@ class DataLoader:
                             mom = (curr_price / start_price - 1) * 100
                 except Exception: pass
 
-                try:
-                    info = yf.Ticker(ticker).info
-                    if not info: raise ValueError("No info")
-                        
-                    data = {
-                        'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
-                        'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
-                        'PER': info.get('trailingPE', 0), 'PBR': info.get('priceToBook', 0),
-                        'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
-                        'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
-                        'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
-                        'ForwardEPS': info.get('forwardEps', 0), 'TrailingEPS': info.get('trailingEps', 0)
-                    }
-                    if data['ForwardEPS'] == 0 and old_row is not None:
-                        data['ForwardEPS'] = old_row.get('ForwardEPS', 0)
-                        
-                    with lock: fundamental_data.append(data); count += 1
-                except Exception as e:
-                    logger.warning(f"Error fetching yfinance for {ticker}: {e}. Reusing cache.")
+                # 2. 상세 재무 정보 (Ticker.info 활용 - Retry 로직 포함)
+                data = None
+                # 대량 배치인 경우 Rate Limit 방지를 위해 info 호출을 최소화하거나 지연을 크게 둠
+                if is_large_batch and not force_download and old_row is not None:
+                    # 기존 데이터 재사용 (가격/모멘텀만 갱신)
+                    data = old_row.to_dict()
+                    data['Price'] = curr_price if curr_price > 0 else data.get('Price', 0)
+                    data['Momentum'] = mom if mom != 0 else data.get('Momentum', 0)
+                else:
+                    # 정밀 분석이 필요한 경우 (소량 종목 또는 강제 갱신)
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            # 요청 간 짧은 지연 (차단 방지)
+                            if not is_large_batch: time.sleep(random.uniform(0.5, 1.5))
+                            
+                            t_obj = yf.Ticker(ticker)
+                            info = t_obj.info
+                            if not info: raise ValueError("Empty info")
+                            
+                            data = {
+                                'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
+                                'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
+                                'PER': info.get('trailingPE', 0), 'PBR': info.get('priceToBook', 0),
+                                'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
+                                'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
+                                'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
+                                'ForwardEPS': info.get('forwardEps', 0), 'TrailingEPS': info.get('trailingEps', 0)
+                            }
+                            break # 성공 시 루프 탈출
+                        except Exception as e:
+                            if "Too Many Requests" in str(e) and attempt < max_retries - 1:
+                                wait_time = (attempt + 1) * 5 + random.random()
+                                logger.warning(f"Rate limited for {ticker}, waiting {wait_time:.1f}s...")
+                                time.sleep(wait_time)
+                            else:
+                                if attempt == max_retries - 1:
+                                    logger.warning(f"Failed to fetch info for {ticker} after {max_retries} attempts.")
+                
+                # 3. 최종 데이터 확정 (실패 시 캐시 병합)
+                if data is None:
                     if old_row is not None:
                         data = old_row.to_dict()
                         data['Price'] = curr_price if curr_price > 0 else data.get('Price', 0)
+                        data['Momentum'] = mom if mom != 0 else data.get('Momentum', 0)
                     else:
                         data = {'Ticker': ticker, 'Price': curr_price, 'Momentum': mom, 'ForwardEPS': 0}
-                    with lock: fundamental_data.append(data); count += 1
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
+                with lock: fundamental_data.append(data); count += 1
+
+            # 스레드 풀 크기 축소하여 차단 확률 감소
+            workers = 2 if is_large_batch else 5
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 executor.map(fetch_single_ticker, tickers)
 
         result_df = pd.DataFrame(fundamental_data)
