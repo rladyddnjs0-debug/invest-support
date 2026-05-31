@@ -227,16 +227,29 @@ class DataLoader:
                     executor.map(fetch_single_kr_ticker, tickers)
 
         else:
-            # US logic (omitted for brevity in this tool call, keeping existing logic)
-            # Actually I should keep the logic. I'll just rewrite the whole file carefully.
+            # US logic
+            logger.info(f"Downloading US fundamentals for {len(tickers)} tickers: {tickers}")
+            try:
+                batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
+            except Exception as e:
+                logger.error(f"Batch yfinance download failed: {e}")
+                batch_data = pd.DataFrame()
+
             lock = threading.Lock(); total = len(tickers); count = 0
-            batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
             
             def fetch_single_ticker(ticker):
                 nonlocal count; curr_price = 0; mom = 0
                 try:
                     if not batch_data.empty:
-                        t_data = batch_data[ticker].dropna() if len(tickers) > 1 else batch_data.dropna()
+                        # MultiIndex check
+                        if isinstance(batch_data.columns, pd.MultiIndex):
+                            if ticker in batch_data.columns.levels[0]:
+                                t_data = batch_data[ticker].dropna()
+                            else:
+                                t_data = pd.DataFrame()
+                        else:
+                            t_data = batch_data.dropna()
+                            
                         if not t_data.empty:
                             price_col = t_data['Close']
                             if isinstance(price_col, pd.DataFrame):
@@ -247,8 +260,14 @@ class DataLoader:
                             mom = (curr_price / start_price - 1) * 100
                 except Exception as e:
                     logger.debug(f"Price/Momentum calculation failed for {ticker}: {e}")
+
                 try:
-                    info = yf.Ticker(ticker).info
+                    ticker_obj = yf.Ticker(ticker)
+                    info = ticker_obj.info
+                    
+                    if not info:
+                        raise ValueError(f"No info returned for {ticker}")
+                        
                     data = {
                         'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
                         'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
@@ -259,15 +278,22 @@ class DataLoader:
                         'ForwardEPS': info.get('forwardEps', 0),
                         'TrailingEPS': info.get('trailingEps', 0)
                     }
-                    with lock: fundamental_data.append(data); count += 1
+                    with lock: 
+                        fundamental_data.append(data)
+                        count += 1
+                        logger.debug(f"Successfully fetched {ticker}")
                 except Exception as e:
-                    logger.debug(f"Error fetching yfinance info for {ticker}: {e}")
-                    with lock: count += 1; fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
+                    logger.warning(f"Error fetching yfinance info for {ticker}: {e}")
+                    # 최소한의 데이터라도 추가하여 루프가 깨지지 않게 함
+                    with lock: 
+                        count += 1
+                        fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
                 executor.map(fetch_single_ticker, tickers)
 
         result_df = pd.DataFrame(fundamental_data)
+        logger.info(f"Fetched {len(result_df)} records for {market_name} fundamentals")
         if not result_df.empty:
             result_df.to_csv(cache_path, index=False)
             logger.info(f"Saved {market_name} fundamentals to cache: {cache_path}")
