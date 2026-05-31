@@ -31,6 +31,7 @@ import streamlit.components.v1 as components
 
 def tradingview_widget(symbol, height=400, interval="5"):
     """TradingView Advanced Real-time Chart Widget"""
+    # ... (keeping existing logic)
     widget_html = f"""
     <div class="tradingview-widget-container" style="height:{height}px;width:100%;">
       <div id="tv_chart_{symbol.replace(':', '_')}" style="height:{height}px;"></div>
@@ -54,6 +55,11 @@ def tradingview_widget(symbol, height=400, interval="5"):
     </div>
     """
     components.html(widget_html, height=height)
+
+@st.cache_data(ttl=3600*24) # 24시간 캐시
+def get_cached_historical_per(ticker, force_download=False):
+    """역사적 PER 계산 결과를 캐싱하여 API 호출 최소화"""
+    return engine.calculate_historical_per_bands(ticker, force_download=force_download)
 
 # --- 상세 분석 팝업 함수 ---
 @st.dialog("📊 종목 상세 분석", width="large")
@@ -1396,7 +1402,7 @@ elif menu == "💎 펀더멘털 가치평가":
                         mode_label = "(Matrix 기준)"
                     else:
                         with st.spinner(f"{ticker} 역사적 PER 분석 중..."):
-                            hist_bands = engine.calculate_historical_per_bands(ticker)
+                            hist_bands = get_cached_historical_per(ticker, force_download=force_refresh)
                             if hist_bands:
                                 # 자동 산출된 PER를 Forward EPS에 적용
                                 scenarios = {

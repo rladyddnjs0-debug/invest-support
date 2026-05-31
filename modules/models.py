@@ -26,12 +26,35 @@ class AnalysisModel:
                 logger.error(f"Error loading valuation matrix: {e}")
         return {}
 
-    def calculate_historical_per_bands(self, ticker):
+    def calculate_historical_per_bands(self, ticker, force_download=False):
         """
         과거 5년 데이터를 바탕으로 역사적 PER 밴드 산출.
         Base: Median, Bear: 25th Percentile, Bull: 75th Percentile
         """
+        cache_dir = "data"
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+        cache_path = os.path.join(cache_dir, "historical_per_cache.json")
+        
+        # 1. 파일 캐시 확인
+        cache_data = {}
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+            except Exception:
+                pass
+        
+        if not force_download and ticker in cache_data:
+            cached_entry = cache_data[ticker]
+            # 캐시 유효 기간 확인 (예: 7일)
+            cache_time = datetime.strptime(cached_entry['timestamp'], '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - cache_time).days < 7:
+                logger.info(f"Using cached historical PER for {ticker}")
+                return cached_entry['data']
+
         try:
+            logger.info(f"Fetching fresh historical PER for {ticker} from yfinance...")
             t = yf.Ticker(ticker)
             # 1. 과거 실적 (연간) 및 발행주식수 가져오기
             income = t.income_stmt
@@ -87,16 +110,30 @@ class AnalysisModel:
             if per_series.empty:
                 return None
                 
-            return {
+            result = {
                 'bear': float(per_series.quantile(0.25)),
                 'base': float(per_series.median()),
                 'bull': float(per_series.quantile(0.75)),
                 'min': float(per_series.min()),
                 'max': float(per_series.max()),
-                'current': float(t.info.get('trailingPE', 0))
+                'current': float(t.info.get('trailingPE', 0)) if t.info else 0
             }
+            
+            # 4. 캐시 저장
+            cache_data[ticker] = {
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'data': result
+            }
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, indent=4)
+                
+            return result
         except Exception as e:
             logger.error(f"Error calculating historical PER for {ticker}: {e}")
+            # 에러 발생 시 기존 캐시가 있다면 리턴 (기간 만료되었더라도 0보다는 나음)
+            if ticker in cache_data:
+                logger.warning(f"Returning expired cache for {ticker} due to error.")
+                return cache_data[ticker]['data']
             return None
 
     def calculate_valuation_scenarios(self, ticker, forward_eps, current_price):
