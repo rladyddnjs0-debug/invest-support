@@ -105,12 +105,12 @@ class DataLoader:
             ]
 
 
-    def get_stock_fundamentals(self, tickers=None, progress_callback=None, market_name="us"):
+    def get_stock_fundamentals(self, tickers=None, progress_callback=None, market_name="us", force_download=False):
         if tickers is None: tickers = self.sample_stocks
         cache_file = f"{market_name}_fundamentals.csv"
         cache_path = os.path.join(self.data_dir, cache_file)
         
-        if os.path.exists(cache_path):
+        if not force_download and os.path.exists(cache_path):
             file_mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
             if (datetime.now() - file_mtime).days < self.config.cache_expiry_days:
                 df_cache = pd.read_csv(cache_path)

@@ -1366,14 +1366,23 @@ elif menu == "💎 펀더멘털 가치평가":
     if not tickers:
         st.warning("설정된 가치평가 종목이 없습니다. `config/valuation_matrix.json`을 확인해주세요.")
     else:
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            st.markdown("가치평가 대상: " + ", ".join(tickers))
+        with c2:
+            force_refresh = st.button("🔄 데이터 새로고침", use_container_width=True)
+
         # 데이터 로드
         with st.spinner('종목별 펀더멘털 데이터 수집 중...'):
-            fund_df = loader.get_stock_fundamentals(tickers, market_name="us") # 주요 종목은 대부분 미국 시장
+            fund_df = loader.get_stock_fundamentals(tickers, market_name="us", force_download=force_refresh)
             
-        if not fund_df.empty:
+        if fund_df is not None and not fund_df.empty:
+            found_count = 0
             for i, ticker in enumerate(tickers):
-                row = fund_df[fund_df['Ticker'] == ticker]
+                # 티커 매칭 (대소문자 무시 및 공백 제거)
+                row = fund_df[fund_df['Ticker'].str.upper() == ticker.upper()]
                 if not row.empty:
+                    found_count += 1
                     row = row.iloc[0]
                     fwd_eps = row.get('ForwardEPS', 0)
                     curr_price = row.get('Price', 0)
@@ -1395,7 +1404,6 @@ elif menu == "💎 펀더멘털 가치평가":
                         st.write(f"현재가: **${curr_price:,.2f}** (밴드 내 위치: **{pos:.1f}%**)")
                         
                         # 진행 바 (Bear=0, Bull=100)
-                        bar_color = "green" if pos < 30 else "orange" if pos < 70 else "red"
                         st.progress(min(max(pos/100.0, 0.0), 1.0))
                         
                         if curr_price <= s['bear']:
@@ -1404,8 +1412,12 @@ elif menu == "💎 펀더멘털 가치평가":
                             st.error(f"🚫 **주의:** {ticker}가 Bull Case 이상의 고평가 영역에 위치해 있습니다.")
                             
                         st.markdown("---")
+            
+            if found_count == 0:
+                st.warning("설정된 종목들을 데이터에서 찾을 수 없습니다. 티커명을 확인해주세요.")
+                st.write("불러온 데이터 티커 목록:", fund_df['Ticker'].tolist())
         else:
-            st.error("종목 데이터를 불러오는 데 실패했습니다.")
+            st.error("종목 데이터를 불러오는 데 실패했습니다. 잠시 후 다시 시도하거나 '데이터 새로고침'을 눌러주세요.")
 
 elif menu == "🚀 실시간 마켓 모니터":
     st.title("🚀 실시간 마켓 모니터 (5분봉)")
