@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import pandas as pd
+import yfinance as yf
 from scipy.optimize import curve_fit
 from modules.lppl_engine import LPPLEngine
 from modules.config import settings
@@ -24,6 +25,79 @@ class AnalysisModel:
             except Exception as e:
                 logger.error(f"Error loading valuation matrix: {e}")
         return {}
+
+    def calculate_historical_per_bands(self, ticker):
+        """
+        과거 5년 데이터를 바탕으로 역사적 PER 밴드 산출.
+        Base: Median, Bear: 25th Percentile, Bull: 75th Percentile
+        """
+        try:
+            t = yf.Ticker(ticker)
+            # 1. 과거 실적 (연간) 및 발행주식수 가져오기
+            income = t.income_stmt
+            bs = t.balance_sheet
+            
+            if income.empty or bs.empty:
+                return None
+                
+            # 순이익 및 주식수 행 식별
+            net_income_row = 'Net Income Common Stockholders' if 'Net Income Common Stockholders' in income.index else 'Net Income'
+            shares_row = 'Ordinary Shares Number' if 'Ordinary Shares Number' in bs.index else 'Share Issued'
+            
+            if net_income_row not in income.index or shares_row not in bs.index:
+                return None
+                
+            annual_eps = income.loc[net_income_row] / bs.loc[shares_row]
+            annual_eps = annual_eps.dropna()
+            
+            if annual_eps.empty:
+                return None
+            
+            # 2. 실적 발표일 근처의 주가 가져오기 (5년)
+            hist = t.history(period="5y")
+            if hist.empty:
+                return None
+                
+            per_list = []
+            for date, eps in annual_eps.items():
+                # 해당 날짜와 가장 가까운 영업일 주가 찾기
+                try:
+                    # tz-aware issue handle
+                    target_date = pd.to_datetime(date).tz_localize(hist.index.tz)
+                    idx = hist.index.get_indexer([target_date], method='nearest')[0]
+                    price = hist.iloc[idx]['Close']
+                    if eps > 0:
+                        per_list.append(price / eps)
+                except Exception:
+                    continue
+            
+            # 3. 일일 PER 추정 (최근 1년 주가 / 최근 EPS)
+            latest_eps = annual_eps.iloc[0]
+            if latest_eps > 0:
+                recent_hist = hist.tail(252) # 약 1년
+                daily_pers = recent_hist['Close'] / latest_eps
+                per_list.extend(daily_pers.tolist())
+            
+            if not per_list:
+                return None
+                
+            per_series = pd.Series(per_list).dropna()
+            per_series = per_series[per_series > 0] # 음수 PER 제외
+            
+            if per_series.empty:
+                return None
+                
+            return {
+                'bear': float(per_series.quantile(0.25)),
+                'base': float(per_series.median()),
+                'bull': float(per_series.quantile(0.75)),
+                'min': float(per_series.min()),
+                'max': float(per_series.max()),
+                'current': float(t.info.get('trailingPE', 0))
+            }
+        except Exception as e:
+            logger.error(f"Error calculating historical PER for {ticker}: {e}")
+            return None
 
     def calculate_valuation_scenarios(self, ticker, forward_eps, current_price):
         """
