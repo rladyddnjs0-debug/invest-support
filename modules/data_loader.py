@@ -223,6 +223,11 @@ class DataLoader:
                             info = t_obj.info
                             if not info: raise ValueError("Empty info")
                             
+                            # EPS 데이터 추출 (Forward -> Trailing 순으로 시도)
+                            fwd_eps = info.get('forwardEps')
+                            if fwd_eps is None or fwd_eps == 0:
+                                fwd_eps = info.get('trailingEps', 0)
+                                
                             data = {
                                 'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
                                 'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
@@ -230,7 +235,7 @@ class DataLoader:
                                 'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
                                 'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
                                 'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
-                                'ForwardEPS': info.get('forwardEps', 0), 'TrailingEPS': info.get('trailingEps', 0)
+                                'ForwardEPS': fwd_eps, 'TrailingEPS': info.get('trailingEps', 0)
                             }
                             break # 성공 시 루프 탈출
                         except Exception as e:

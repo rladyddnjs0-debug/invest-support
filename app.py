@@ -1434,6 +1434,7 @@ elif menu == "💎 펀더멘털 가치평가":
                         pos = res['position_pct']
                         
                         st.markdown(f"### {res['ticker_name']} ({ticker}) {mode_label}")
+                        # ... (rest of display logic)
                         
                         # 3분할 표시
                         m1, m2, m3 = st.columns(3)
@@ -1481,6 +1482,9 @@ elif menu == "💎 펀더멘털 가치평가":
                         elif curr_price >= s['bull']:
                             st.error(f"🚫 **주의:** {ticker}가 역사적/수동 고평가 임계점을 상회했습니다.")
                             
+                        st.markdown("---")
+                    else:
+                        st.warning(f"⚠️ **{ticker}**: 가치 평가를 위한 핵심 데이터(EPS 등)를 API로부터 가져오지 못했습니다. Yahoo Finance 차단이 해제된 후 '데이터 새로고침'을 시도해 주세요.")
                         st.markdown("---")
             
             if found_count == 0:

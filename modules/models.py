@@ -55,14 +55,33 @@ class AnalysisModel:
 
         try:
             logger.info(f"Fetching fresh historical PER for {ticker} from yfinance...")
-            t = yf.Ticker(ticker)
-            # 1. 과거 실적 (연간) 및 발행주식수 가져오기
-            income = t.income_stmt
-            bs = t.balance_sheet
             
-            if income.empty or bs.empty:
-                return None
-                
+            # Rate limit 방지를 위한 재시도 로직
+            max_retries = 3
+            income, bs, hist, current_per = None, None, None, 0
+            
+            for attempt in range(max_retries):
+                try:
+                    t = yf.Ticker(ticker)
+                    income = t.income_stmt
+                    time.sleep(random.uniform(0.5, 1.0))
+                    bs = t.balance_sheet
+                    time.sleep(random.uniform(0.5, 1.0))
+                    hist = t.history(period="5y")
+                    current_per = float(t.info.get('trailingPE', 0)) if t.info else 0
+                    
+                    if income.empty or bs.empty or hist.empty:
+                        raise ValueError("Some financial data is empty")
+                    break # 성공 시 탈출
+                except Exception as e:
+                    if "Too Many Requests" in str(e) and attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 10 + random.random()
+                        logger.warning(f"Rate limited for {ticker} history, waiting {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                    else:
+                        if attempt == max_retries - 1: raise e
+            
+            # 1. 과거 실적 (연간) 및 발행주식수 가져오기
             # 순이익 및 주식수 행 식별
             net_income_row = 'Net Income Common Stockholders' if 'Net Income Common Stockholders' in income.index else 'Net Income'
             shares_row = 'Ordinary Shares Number' if 'Ordinary Shares Number' in bs.index else 'Share Issued'
@@ -76,14 +95,9 @@ class AnalysisModel:
             if annual_eps.empty:
                 return None
             
-            # 2. 실적 발표일 근처의 주가 가져오기 (5년)
-            hist = t.history(period="5y")
-            if hist.empty:
-                return None
-                
+            # 2. 실적 발표일 근처의 주가 분석
             per_list = []
             for date, eps in annual_eps.items():
-                # 해당 날짜와 가장 가까운 영업일 주가 찾기
                 try:
                     # tz-aware issue handle
                     target_date = pd.to_datetime(date).tz_localize(hist.index.tz)
@@ -116,7 +130,7 @@ class AnalysisModel:
                 'bull': float(per_series.quantile(0.75)),
                 'min': float(per_series.min()),
                 'max': float(per_series.max()),
-                'current': float(t.info.get('trailingPE', 0)) if t.info else 0
+                'current': current_per
             }
             
             # 4. 캐시 저장
