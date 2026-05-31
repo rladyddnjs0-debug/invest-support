@@ -110,15 +110,21 @@ class DataLoader:
         cache_file = f"{market_name}_fundamentals.csv"
         cache_path = os.path.join(self.data_dir, cache_file)
         
-        # force_download가 True이면 캐시를 무시하고 진행
-        if not force_download and os.path.exists(cache_path):
+        # 기존 캐시 로드 (업데이트 실패 시 보존용)
+        df_old_cache = pd.DataFrame()
+        if os.path.exists(cache_path):
+            try:
+                df_old_cache = pd.read_csv(cache_path)
+            except Exception:
+                pass
+
+        # force_download가 아니면 캐시 바로 반환
+        if not force_download and not df_old_cache.empty:
             file_mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
             if (datetime.now() - file_mtime).days < self.config.cache_expiry_days:
-                df_cache = pd.read_csv(cache_path)
-                # 요청한 티커들이 캐시에 모두 포함되어 있는지 확인
-                if set(tickers).issubset(set(df_cache['Ticker'].astype(str).tolist())):
+                if set(tickers).issubset(set(df_old_cache['Ticker'].astype(str).tolist())):
                     logger.info(f"Using cached {market_name} fundamentals from {cache_path}")
-                    return df_cache[df_cache['Ticker'].isin(tickers)]
+                    return df_old_cache[df_old_cache['Ticker'].isin(tickers)]
 
         if force_download:
             logger.info(f"Force refreshing {market_name} fundamentals...")
@@ -147,87 +153,22 @@ class DataLoader:
                             row = df_krx.loc[pure_ticker]
                             eps, bps = row.get('EPS', 0), row.get('BPS', 1)
                             roe = (eps / bps * 100) if bps > 0 else 0
-                            mcap = df_cap.loc[pure_ticker, '시가총액'] if pure_ticker in df_cap.index else 0
-                            mom = df_momentum.loc[pure_ticker, '등락률'] if pure_ticker in df_momentum.index else 0
                             fundamental_data.append({
                                 'Ticker': full_ticker, 'Name': krx_stock.get_market_ticker_name(pure_ticker),
                                 'Sector': 'KOSPI' if pure_ticker in df_kospi.index else 'KOSDAQ',
                                 'Price': row.get('종가', 0), 'PER': row.get('PER', 0), 'PBR': row.get('PBR', 0),
-                                'ROE': roe, 'ProfitMargin': 0, 'RevenueGrowth': 0, 'MarketCap': mcap, 'Momentum': mom
+                                'ROE': roe, 'ProfitMargin': 0, 'RevenueGrowth': 0, 'MarketCap': df_cap.loc[pure_ticker, '시가총액'] if pure_ticker in df_cap.index else 0,
+                                'Momentum': df_momentum.loc[pure_ticker, '등락률'] if pure_ticker in df_momentum.index else 0,
+                                'ForwardEPS': eps
                             })
             except Exception as e:
                 logger.warning(f"KR Error (pykrx): {e}")
 
             if not fundamental_data:
-                logger.info("Falling back to yfinance for KR stock fundamentals...")
-                lock = threading.Lock()
-                total = len(tickers)
-                count = 0
-                batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
-                
-                def fetch_single_kr_ticker(ticker):
-                    nonlocal count; curr_price = 0; mom = 0
-                    try:
-                        if not batch_data.empty:
-                            t_data = batch_data[ticker].dropna() if len(tickers) > 1 else batch_data.dropna()
-                            if not t_data.empty:
-                                price_col = t_data['Close']
-                                if isinstance(price_col, pd.DataFrame):
-                                    price_col = price_col.iloc[:, 0]
-                                
-                                curr_price = float(price_col.iloc[-1])
-                                start_price = float(price_col.iloc[0])
-                                mom = (curr_price / start_price - 1) * 100
-                    except Exception as e:
-                        logger.debug(f"Price/Momentum calculation failed for {ticker}: {e}")
+                # KR Fallback to yfinance
+                pass
 
-                    try:
-                        info = yf.Ticker(ticker).info
-                        
-                        per = info.get('trailingPE')
-                        if per is None or per == 0:
-                            per = info.get('forwardPE', 0)
-                        if per is None:
-                            per = 0
-                            
-                        roe = info.get('returnOnEquity')
-                        if roe is None:
-                            roe = 0
-                        roe_pct = roe * 100
-                        
-                        pbr = info.get('priceToBook')
-                        if (pbr is None or pbr == 0) and roe > 0 and per > 0:
-                            pbr = roe * per
-                        if pbr is None:
-                            pbr = 0
-                            
-                        data = {
-                            'Ticker': ticker,
-                            'Name': info.get('shortName', ticker),
-                            'Sector': info.get('sector', 'N/A'),
-                            'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
-                            'PER': per,
-                            'PBR': pbr,
-                            'ROE': roe_pct,
-                            'ProfitMargin': info.get('profitMargins', 0) * 100,
-                            'RevenueGrowth': info.get('revenueGrowth', 0) * 100,
-                            'MarketCap': info.get('marketCap', 0),
-                            'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
-                            'ForwardEPS': info.get('forwardEps', 0),
-                            'TrailingEPS': info.get('trailingEps', 0)
-                        }
-                        with lock: fundamental_data.append(data); count += 1
-                    except Exception as e:
-                        logger.debug(f"Error fetching yfinance info for {ticker}: {e}")
-                        with lock:
-                            count += 1
-                            fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                    executor.map(fetch_single_kr_ticker, tickers)
-
-        else:
-            # US logic
+        if not fundamental_data or market_name == "us":
             logger.info(f"Downloading US fundamentals for {len(tickers)} tickers: {tickers}")
             try:
                 batch_data = yf.download(tickers, period="1y", interval="1d", progress=False, group_by='ticker')
@@ -235,38 +176,32 @@ class DataLoader:
                 logger.error(f"Batch yfinance download failed: {e}")
                 batch_data = pd.DataFrame()
 
-            lock = threading.Lock(); total = len(tickers); count = 0
+            lock = threading.Lock(); count = 0
             
             def fetch_single_ticker(ticker):
                 nonlocal count; curr_price = 0; mom = 0
+                # 기존 데이터 백업
+                old_row = df_old_cache[df_old_cache['Ticker'] == ticker].iloc[0] if not df_old_cache.empty and ticker in df_old_cache['Ticker'].values else None
+                
                 try:
                     if not batch_data.empty:
-                        # MultiIndex check
                         if isinstance(batch_data.columns, pd.MultiIndex):
                             if ticker in batch_data.columns.levels[0]:
                                 t_data = batch_data[ticker].dropna()
-                            else:
-                                t_data = pd.DataFrame()
-                        else:
-                            t_data = batch_data.dropna()
+                            else: t_data = pd.DataFrame()
+                        else: t_data = batch_data.dropna()
                             
                         if not t_data.empty:
                             price_col = t_data['Close']
-                            if isinstance(price_col, pd.DataFrame):
-                                price_col = price_col.iloc[:, 0]
-                            
+                            if isinstance(price_col, pd.DataFrame): price_col = price_col.iloc[:, 0]
                             curr_price = float(price_col.iloc[-1])
                             start_price = float(price_col.iloc[0])
                             mom = (curr_price / start_price - 1) * 100
-                except Exception as e:
-                    logger.debug(f"Price/Momentum calculation failed for {ticker}: {e}")
+                except Exception: pass
 
                 try:
-                    ticker_obj = yf.Ticker(ticker)
-                    info = ticker_obj.info
-                    
-                    if not info:
-                        raise ValueError(f"No info returned for {ticker}")
+                    info = yf.Ticker(ticker).info
+                    if not info: raise ValueError("No info")
                         
                     data = {
                         'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
@@ -275,38 +210,29 @@ class DataLoader:
                         'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
                         'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
                         'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
-                        'ForwardEPS': info.get('forwardEps', 0),
-                        'TrailingEPS': info.get('trailingEps', 0)
+                        'ForwardEPS': info.get('forwardEps', 0), 'TrailingEPS': info.get('trailingEps', 0)
                     }
-                    with lock: 
-                        fundamental_data.append(data)
-                        count += 1
-                        logger.debug(f"Successfully fetched {ticker}")
+                    if data['ForwardEPS'] == 0 and old_row is not None:
+                        data['ForwardEPS'] = old_row.get('ForwardEPS', 0)
+                        
+                    with lock: fundamental_data.append(data); count += 1
                 except Exception as e:
-                    logger.warning(f"Error fetching yfinance info for {ticker}: {e}")
-                    # 최소한의 데이터라도 추가하여 루프가 깨지지 않게 함
-                    with lock: 
-                        count += 1
-                        fundamental_data.append({'Ticker': ticker, 'Price': curr_price, 'Momentum': mom})
+                    logger.warning(f"Error fetching yfinance for {ticker}: {e}. Reusing cache.")
+                    if old_row is not None:
+                        data = old_row.to_dict()
+                        data['Price'] = curr_price if curr_price > 0 else data.get('Price', 0)
+                    else:
+                        data = {'Ticker': ticker, 'Price': curr_price, 'Momentum': mom, 'ForwardEPS': 0}
+                    with lock: fundamental_data.append(data); count += 1
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
                 executor.map(fetch_single_ticker, tickers)
 
         result_df = pd.DataFrame(fundamental_data)
-        logger.info(f"Fetched {len(result_df)} records for {market_name} fundamentals")
         if not result_df.empty:
             result_df.to_csv(cache_path, index=False)
-            logger.info(f"Saved {market_name} fundamentals to cache: {cache_path}")
+            logger.info(f"Saved {market_name} fundamentals ({len(result_df)} records) to cache.")
         return result_df
-
-
-    def get_historical_fundamentals(self, tickers, base_date, market_name="us"):
-        """
-        백테스트용 과거 시점 펀더멘털 데이터를 조회합니다.
-        (실제 과거 DB가 없을 경우 현재 캐시 데이터에서 모멘텀 등을 역산하여 근사치를 반환합니다.)
-        """
-        # 현재는 완벽한 시계열 펀더멘털 DB가 없으므로, 현재 펀더멘털을 가져오되
-        # 수익률(Momentum) 부분만 과거 시점에 맞춰 조정하는 Fallback 로직을 사용합니다.
         df = self.get_stock_fundamentals(tickers, market_name=market_name)
         if df.empty:
             return df
