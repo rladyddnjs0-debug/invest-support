@@ -1330,14 +1330,20 @@ elif menu == "🔍 종목 스크리너":
 
         # --- 백테스트 시뮬레이션 섹션 ---
         st.markdown("---")
-        st.subheader("📊 퀀트 전략 과거 성과 시뮬레이션")
+        st.subheader("📊 현재 상위 종목의 최근 1년 성과 (참고용)")
         st.markdown("""
-        현재 선택된 **레짐 가중치**를 바탕으로, **정확히 1년 전**에 선정된 상위 10개 종목에 투자했을 때의 성과를 확인합니다.
+        현재 **레짐 가중치**로 오늘 기준 상위 10개 종목을 선정한 뒤, 그 종목들이 지난 1년간 실제로 어떤 수익률을 기록했는지 보여줍니다.
         (한국: 펀더멘털+모멘텀 복합 / 미국: 모멘텀 중심)
         """)
-        
-        if st.button("🚀 1년 전 성과 백테스트 실행", width="stretch"):
-            with st.spinner('1년 전 시장 데이터를 분석하고 성과를 계산 중...'):
+        st.warning(
+            "⚠️ 이 결과는 '1년 전에 이 전략을 썼다면 어땠을까'를 검증하는 진짜 백테스트가 아닙니다. "
+            "종목 선정 자체가 **오늘 시점의 펀더멘털 데이터**로 이뤄지기 때문에, 현재 펀더멘털이 좋은 "
+            "종목은 최근 1년간 주가도 함께 오른 경우가 많아 실제보다 낙관적인 결과가 나올 수 있습니다 "
+            "(사전관찰 편향, look-ahead bias)."
+        )
+
+        if st.button("🚀 현재 상위 종목 최근 1년 성과 조회", width="stretch"):
+            with st.spinner('상위 종목의 최근 1년 성과를 분석 중...'):
                 top_10_hist, perf_df = backtester.run_backtest(market_type, regime_choice)
                 
                 if top_10_hist is not None and perf_df is not None:
@@ -1375,7 +1381,7 @@ elif menu == "🔍 종목 스크리너":
                     st.plotly_chart(fig_perf, width="stretch")
                     
                     # 선정된 종목 리스트
-                    with st.expander("📌 1년 전 선정되었던 Top 10 종목 보기"):
+                    with st.expander("📌 오늘 기준으로 선정된 Top 10 종목 보기"):
                         st.table(top_10_hist[['Ticker', 'Name', 'FinalScore', 'Momentum']])
                 else:
                     st.error("백테스트를 위한 과거 데이터를 충분히 확보하지 못했습니다. (미국 주식은 티커가 너무 많아 시간이 소요될 수 있습니다)")

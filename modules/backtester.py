@@ -12,7 +12,10 @@ class QuantBacktester:
 
     def run_backtest(self, market_type, regime_choice, lookback_days=365):
         """
-        1년 전 시점의 Top 10 종목을 선정하고 현재까지의 성과를 계산합니다.
+        '오늘 시점'의 펀더멘털로 선정한 Top 10 종목이 지난 1년간 기록한 실제 수익률을 계산합니다.
+        주의: 종목 선정에 사용하는 펀더멘털은 항상 최신 데이터이며 base_date 시점으로 되돌아가지
+        않으므로, 이는 전략의 사전 예측력을 검증하는 진짜 point-in-time 백테스트가 아니라
+        참고용 성과 조회 기능입니다 (look-ahead bias 있음).
         """
         # 1. 시점 설정
         base_date = datetime.now() - timedelta(days=lookback_days)
