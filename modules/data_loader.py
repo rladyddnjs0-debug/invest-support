@@ -146,8 +146,9 @@ class DataLoader:
                 
                 if df_krx is not None:
                     df_cap = krx_stock.get_market_cap_by_ticker(date_str, market="ALL")
-                    six_months_ago = (target_date - timedelta(days=180)).strftime("%Y%m%d")
-                    df_momentum = krx_stock.get_market_price_change_by_ticker(six_months_ago, date_str)
+                    momentum_start = (target_date - timedelta(days=395)).strftime("%Y%m%d")
+                    momentum_end = (target_date - timedelta(days=30)).strftime("%Y%m%d")
+                    df_momentum = krx_stock.get_market_price_change_by_ticker(momentum_start, momentum_end)
                     
                     for full_ticker in tickers:
                         pure_ticker = full_ticker.split('.')[0]
@@ -187,7 +188,7 @@ class DataLoader:
                 nonlocal count; curr_price = 0; mom = 0
                 old_row = df_old_cache[df_old_cache['Ticker'] == ticker].iloc[0] if not df_old_cache.empty and ticker in df_old_cache['Ticker'].values else None
                 
-                # 1. 가격 및 모멘텀 (Batch Data 활용)
+                # 1. 가격 및 모멘텀 (Batch Data 활용, 12-1 모멘텀: 최근 1개월 제외)
                 try:
                     if not batch_data.empty:
                         if isinstance(batch_data.columns, pd.MultiIndex):
@@ -195,13 +196,15 @@ class DataLoader:
                                 t_data = batch_data[ticker].dropna()
                             else: t_data = pd.DataFrame()
                         else: t_data = batch_data.dropna()
-                            
+
                         if not t_data.empty:
                             price_col = t_data['Close']
                             if isinstance(price_col, pd.DataFrame): price_col = price_col.iloc[:, 0]
                             curr_price = float(price_col.iloc[-1])
-                            start_price = float(price_col.iloc[0])
-                            mom = (curr_price / start_price - 1) * 100
+                            if len(price_col) >= 22:
+                                price_1mo_ago = float(price_col.iloc[-22])
+                                price_12mo_ago = float(price_col.iloc[0])
+                                mom = (price_1mo_ago / price_12mo_ago - 1) * 100
                 except Exception: pass
 
                 # 2. 상세 재무 정보 (Ticker.info 활용 - Retry 로직 포함)
