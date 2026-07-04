@@ -332,6 +332,32 @@ class DataLoader:
                 return pd.read_csv(file_path, index_col=0, parse_dates=True)
         return None
 
+    def get_daily_changes(self, tickers):
+        """
+        전 종목 당일 등락률(%)을 배치 1회 호출로 계산.
+        시총/섹터 등 정적 정보는 포함하지 않으며, 데이터가 없는 티커는 결과에서 제외된다.
+        """
+        try:
+            data = yf.download(tickers, period="2d", interval="1d", progress=False, group_by='ticker')
+        except Exception as e:
+            logger.error(f"Batch daily change download failed: {e}")
+            return {}
+
+        changes = {}
+        for ticker in tickers:
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    if ticker not in data.columns.levels[0]:
+                        continue
+                    t_close = data[ticker]['Close'].dropna()
+                else:
+                    t_close = data['Close'].dropna()
+                if len(t_close) >= 2:
+                    changes[ticker] = float((t_close.iloc[-1] / t_close.iloc[-2] - 1) * 100)
+            except Exception:
+                continue
+        return changes
+
     def get_sector_data(self, period="5y"):
         sector_data = {name: self.get_market_history(name, period=period)['Close'] for name in self.sector_etfs}
         return pd.DataFrame(sector_data)

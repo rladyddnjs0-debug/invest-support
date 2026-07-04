@@ -136,15 +136,59 @@ def test_get_market_history(mock_download, clean_data_loader):
 @patch('yfinance.download')
 def test_get_yield_spread(mock_download, clean_data_loader):
     loader = clean_data_loader
-    
+
     # 10Y 및 2Y 금리 모킹
     mock_10y = pd.DataFrame({'Close': [4.0, 4.1]}, index=pd.date_range(start="2023-01-01", periods=2))
     mock_2y = pd.DataFrame({'Close': [3.5, 3.7]}, index=pd.date_range(start="2023-01-01", periods=2))
-    
+
     mock_download.side_effect = [mock_10y, mock_2y]
-    
+
     spread = loader.get_yield_spread(period="1y")
     assert spread is not None
     assert 'Spread' in spread.columns
     # Spread = 10Y - 2Y => [0.5, 0.4]
     assert np.allclose(spread['Spread'].values, [0.5, 0.4])
+
+
+@patch('yfinance.download')
+def test_get_daily_changes(mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    mock_df = pd.DataFrame({
+        ('AAPL', 'Close'): [150.0, 153.0],
+        ('MSFT', 'Close'): [300.0, 297.0],
+    }, index=pd.date_range(start="2023-01-01", periods=2))
+    mock_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close'), ('MSFT', 'Close')])
+    mock_download.return_value = mock_df
+
+    changes = loader.get_daily_changes(["AAPL", "MSFT"])
+
+    assert changes["AAPL"] == pytest.approx((153.0 / 150.0 - 1) * 100)
+    assert changes["MSFT"] == pytest.approx((297.0 / 300.0 - 1) * 100)
+
+
+@patch('yfinance.download')
+def test_get_daily_changes_missing_ticker(mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    # MSFT를 요청했지만 다운로드 결과에는 AAPL만 존재하는 상황
+    mock_df = pd.DataFrame({
+        ('AAPL', 'Close'): [150.0, 153.0],
+    }, index=pd.date_range(start="2023-01-01", periods=2))
+    mock_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+    mock_download.return_value = mock_df
+
+    changes = loader.get_daily_changes(["AAPL", "MSFT"])
+
+    assert "AAPL" in changes
+    assert "MSFT" not in changes
+
+
+@patch('yfinance.download')
+def test_get_daily_changes_download_failure(mock_download, clean_data_loader):
+    loader = clean_data_loader
+    mock_download.side_effect = Exception("Too Many Requests")
+
+    changes = loader.get_daily_changes(["AAPL", "MSFT"])
+
+    assert changes == {}
