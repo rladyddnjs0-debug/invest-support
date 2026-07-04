@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from modules.models import AnalysisModel, QuantScreener
+from modules.models import AnalysisModel, QuantScreener, resolve_regime_choice
 
 @pytest.fixture
 def mock_price_data():
@@ -157,3 +157,18 @@ def test_run_screening_sector_neutral_na_string_sector_uses_full_pool_rank():
 
     assert a2_sector_neutral_score == pytest.approx(a2_full_pool_score)
     assert a2_sector_neutral_score < 100.0
+
+
+def test_resolve_regime_choice_uses_auto_by_default():
+    result = resolve_regime_choice("Risk-off (위험 관리)", False, "Transition (국면 전환)")
+    assert result == "Risk-off (위험 관리)"
+
+
+def test_resolve_regime_choice_manual_override_wins():
+    result = resolve_regime_choice("Risk-off (위험 관리)", True, "Risk-on (안정 성장)")
+    assert result == "Risk-on (안정 성장)"
+
+
+def test_resolve_regime_choice_falls_back_to_manual_when_auto_missing():
+    result = resolve_regime_choice(None, False, "Transition (국면 전환)")
+    assert result == "Transition (국면 전환)"

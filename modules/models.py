@@ -10,6 +10,14 @@ from modules.lppl_engine import LPPLEngine
 from modules.config import settings
 from modules.logger import logger
 
+
+def resolve_regime_choice(auto_regime, use_manual_override, manual_choice):
+    """수동 오버라이드가 켜져 있거나 자동 계산에 실패했으면 수동 선택값을, 아니면 자동 계산값을 사용한다."""
+    if use_manual_override or not auto_regime:
+        return manual_choice
+    return auto_regime
+
+
 class AnalysisModel:
     def __init__(self):
         self.config = settings.lppl
