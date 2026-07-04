@@ -1063,7 +1063,7 @@ elif menu == "🔍 종목 스크리너":
 
     # 레짐 자동 계산 (리밸런싱 페이지와 동일한 방식, 실패 시 수동 선택으로 폴백)
     ref_index = "^GSPC" if market_name_key == "us" else "^KS11"
-    ref_data = loader.get_market_history(ref_index, period="6mo")
+    ref_data = loader.get_market_history(ref_index, period="2y")
     auto_regime = None
     if ref_data is not None and not ref_data.empty:
         ref_attr = engine.calculate_attractiveness(ref_data['Close'], None)

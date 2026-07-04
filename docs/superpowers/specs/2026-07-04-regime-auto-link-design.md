@@ -14,14 +14,14 @@
 
 ```python
 ref_index = "^GSPC" if market_name_key == "us" else "^KS11"
-ref_data = loader.get_market_history(ref_index, period="6mo")
+ref_data = loader.get_market_history(ref_index, period="2y")
 auto_regime = None
 if ref_data is not None and not ref_data.empty:
     ref_attr = engine.calculate_attractiveness(ref_data['Close'], None)
     auto_regime = ref_attr['regime'] if ref_attr else None
 ```
 
-`period="6mo"`를 쓰는 이유: `calculate_attractiveness` 내부의 `vol`(20일 변동성)과 `z_score` 계산에 필요한 최소 데이터만 있으면 되고, 리밸런싱 페이지의 `period="2y"`는 LPPL 피팅까지 겸하기 위한 것이라 스크리너 페이지에서는 불필요하게 무겁다. 실패 시(`ref_data`가 비어있거나 `calculate_attractiveness`가 `None` 반환) `auto_regime = None`으로 두고 UI에서 수동 선택으로 자연스럽게 폴백한다(아래 UI 동작 참고).
+`period="2y"`를 쓰는 이유: `calculate_attractiveness`는 함수 초입에 `len(prices) < self.config.min_data_points`(기본 200개) 가드가 있어 이보다 짧은 시계열이면 항상 `None`을 반환한다. 또한 `ma_long`(기본 200일) 이동평균과 `z_score`의 `tail(252)` 룩백이 안정적으로 값을 내려면 200일 이동평균이 유효해지는 지점 이후로 1년 가까운 여유 데이터가 더 필요하다. 실제로 초안에서는 가볍게 가려고 `period="6mo"`(약 124거래일)를 썼다가 `min_data_points` 미달로 `calculate_attractiveness`가 항상 `None`을 반환해 자동 계산이 매번 조용히 실패하는 버그가 실측(라이브 야후 파이낸스 데이터)으로 확인되었다. 리밸런싱 페이지와 동일하게 `period="2y"`(약 500거래일)를 써야 실제로 레짐이 계산된다. 실패 시(`ref_data`가 비어있거나 `calculate_attractiveness`가 `None` 반환) `auto_regime = None`으로 두고 UI에서 수동 선택으로 자연스럽게 폴백한다(아래 UI 동작 참고).
 
 ### UI 동작
 
