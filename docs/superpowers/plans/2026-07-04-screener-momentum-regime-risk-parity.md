@@ -309,9 +309,12 @@ Expected: FAIL with `ImportError: cannot import name 'resolve_regime_choice'`
 
 - [ ] **Step 3: 최소 구현**
 
-`modules/models.py`에서 `class QuantScreener:` 선언(현재 461번째 줄 부근) 바로 위에 추가한다:
+`modules/models.py`의 import 블록과 `class AnalysisModel:` 선언 사이(파일 최상단, 11~13번째 줄 부근)에 추가한다. 이 위치를 쓰는 이유는 Task 6에서 추가하는 `_apply_weight_cap` 함수(파일 하단 `class QuantScreener:` 바로 위에 위치)와 삽입 지점을 멀리 떨어뜨려, 두 항목을 별도 워크트리에서 병렬로 작업해도 `modules/models.py` 머지 시 충돌이 나지 않도록 하기 위함이다:
 
 ```python
+from modules.logger import logger
+
+
 def resolve_regime_choice(auto_regime, use_manual_override, manual_choice):
     """수동 오버라이드가 켜져 있거나 자동 계산에 실패했으면 수동 선택값을, 아니면 자동 계산값을 사용한다."""
     if use_manual_override or not auto_regime:
@@ -319,7 +322,7 @@ def resolve_regime_choice(auto_regime, use_manual_override, manual_choice):
     return auto_regime
 
 
-class QuantScreener:
+class AnalysisModel:
 ```
 
 - [ ] **Step 4: 테스트 통과 확인**
@@ -618,7 +621,7 @@ Expected: FAIL — FLAT의 `RecWeight`가 상한(`cap`, N=10·multiple=3.0이면
 
 - [ ] **Step 3: 최소 구현**
 
-`modules/models.py`에서 `resolve_regime_choice` 함수(Task 3에서 추가됨) 바로 아래, `class QuantScreener:` 선언 위에 추가한다:
+`modules/models.py`에서 `class QuantScreener:` 선언(현재 461번째 줄 부근) 바로 위에 추가한다. Task 3의 `resolve_regime_choice`는 파일 최상단(`class AnalysisModel:` 위)에 위치하므로 이 삽입 지점과 겹치지 않는다:
 
 ```python
 def _apply_weight_cap(rec_weights, total_target_weight_pct, max_multiple):
