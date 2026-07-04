@@ -266,7 +266,33 @@ def test_get_daily_changes_pre_market_uses_previous_close(mock_is_regular, mock_
 
 @patch('yfinance.download')
 @patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
-def test_get_daily_changes_stale_extended_data_falls_back_to_reference(mock_is_regular, mock_download, clean_data_loader):
+def test_get_daily_changes_weekend_no_live_data_keeps_last_session_change(mock_is_regular, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    # 주말이라 오늘 정규장 봉이 없고, 연장거래 데이터도 전혀 없는 상황 (예: 토요일)
+    yesterday = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=1)
+    day_before = yesterday - timedelta(days=1)
+
+    daily_df = pd.DataFrame({
+        ('AAPL', 'Close'): [148.0, 150.0],
+    }, index=pd.to_datetime([day_before, yesterday]))
+    daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    # 연장거래 데이터가 비어 있음(빈 DataFrame)
+    extended_df = pd.DataFrame()
+
+    mock_download.side_effect = [daily_df, extended_df]
+
+    changes = loader.get_daily_changes(["AAPL"])
+
+    # 0%로 리셋되지 않고, 가장 최근 완료된 정규장의 등락률(그전날 148 -> 전일 150)을 그대로 유지
+    assert changes["AAPL"]["change"] == pytest.approx((150.0 / 148.0 - 1) * 100)
+    assert changes["AAPL"]["after_hours_change"] is None
+
+
+@patch('yfinance.download')
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
+def test_get_daily_changes_stale_extended_data_falls_back_to_last_session_change(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
 
     today = datetime.now(ZoneInfo("America/New_York")).date()
@@ -288,14 +314,14 @@ def test_get_daily_changes_stale_extended_data_falls_back_to_reference(mock_is_r
 
     changes = loader.get_daily_changes(["AAPL"])
 
-    # 오래된 연장거래 데이터는 무시하고, 마지막 정규장 종가(153)를 그대로 현재가로 취급 -> 변동 없음
-    assert changes["AAPL"]["change"] == pytest.approx(0.0)
+    # 오래된 연장거래 데이터는 무시하고, 가장 최근 완료된 정규장의 등락률(전일 150 -> 금일 153)을 유지
+    assert changes["AAPL"]["change"] == pytest.approx((153.0 / 150.0 - 1) * 100)
     assert changes["AAPL"]["after_hours_change"] is None
 
 
 @patch('yfinance.download')
 @patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
-def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_reference(mock_is_regular, mock_download, clean_data_loader):
+def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_last_session_change(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
 
     today = datetime.now(ZoneInfo("America/New_York")).date()
@@ -306,10 +332,10 @@ def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_reference(
     }, index=pd.to_datetime([yesterday, today]))
     daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
-    # 연장거래 조회는 실패하지만 정규장 종가 기준으로는 계속 동작해야 함
+    # 연장거래 조회는 실패하지만 마지막 정규장 등락률 기준으로는 계속 동작해야 함
     mock_download.side_effect = [daily_df, Exception("Too Many Requests")]
 
     changes = loader.get_daily_changes(["AAPL"])
 
-    assert changes["AAPL"]["change"] == pytest.approx(0.0)
+    assert changes["AAPL"]["change"] == pytest.approx((153.0 / 150.0 - 1) * 100)
     assert changes["AAPL"]["after_hours_change"] is None

@@ -376,9 +376,11 @@ class DataLoader:
         '금일 정규장 종가'와 비교한 애프터마켓 자체 변동률이다. 그 외 시간(정규장 중, 프리마켓)에는
         비교 대상이 되는 '금일 정규장 종가'가 아직 없으므로 None이다.
 
-        연장거래 데이터를 조회했더라도 그 마지막 체결 시각이 '오늘'이 아니면(주말/연휴 등으로 실제
-        거래가 없었던 경우) 사용하지 않고 마지막 정규장 종가를 그대로 현재가로 취급한다. 오래된
-        연장거래 스냅샷이 매 조회마다 미세하게 다른 노이즈성 등락률을 만드는 것을 방지한다.
+        연장거래 데이터가 없거나, 조회했더라도 마지막 체결 시각이 '오늘'이 아니면(주말/연휴 등으로
+        실제 거래가 없었던 경우) 그 데이터는 무시하고 가장 최근에 완료된 정규장의 등락률을 그대로
+        유지한다 (예: 금요일 장 마감 후에는 주말 내내 '목요일 대비 금요일' 등락률을 계속 보여주며,
+        0%로 리셋되지 않는다). 오래된 연장거래 스냅샷이 매 조회마다 미세하게 다른 노이즈성
+        등락률을 만드는 것도 함께 방지한다.
 
         시총/섹터 등 정적 정보는 포함하지 않으며, 데이터가 없는 티커는 결과에서 제외된다.
         """
@@ -405,32 +407,35 @@ class DataLoader:
                 if daily_close is None:
                     continue
 
+                if len(daily_close) < 2:
+                    continue
+
                 after_hours_change = None
                 if is_regular_hours:
-                    if len(daily_close) < 2:
-                        continue
                     reference, current = daily_close.iloc[-2], daily_close.iloc[-1]
                 else:
                     # 마지막 정규장 봉이 '오늘'이면(애프터마켓) 그 전날 종가를, 그렇지 않으면
-                    # (프리마켓, 아직 오늘 봉이 없음) 마지막 봉을 전일 종가로 사용한다.
+                    # (프리마켓 또는 장기 연휴로 아직 오늘 봉이 없음) 마지막 봉을 전일 종가로 사용한다.
                     last_bar_is_today = daily_close.index[-1].date() == today_et
-                    today_close = None
-                    if last_bar_is_today:
-                        if len(daily_close) < 2:
-                            continue
-                        reference = daily_close.iloc[-2]
-                        today_close = daily_close.iloc[-1]
-                    else:
-                        reference = daily_close.iloc[-1]
+                    today_close = daily_close.iloc[-1] if last_bar_is_today else None
 
-                    # 연장거래 데이터가 있어도, 그 마지막 체결 시각이 '오늘'이 아니면(장기 연휴 등으로
-                    # 실제 거래가 없었던 경우) 사용하지 않고 마지막 정규장 종가를 그대로 현재가로 둔다.
-                    current = reference
+                    # 기본값(연장거래 라이브 데이터가 없을 때): 가장 최근 완료된 정규장의 등락률을
+                    # 그대로 유지한다 (예: 금요일 장 마감 후 주말 내내 목-금 등락률을 계속 보여줌).
+                    reference, current = daily_close.iloc[-2], daily_close.iloc[-1]
+
+                    # 연장거래 데이터가 있고, 그 마지막 체결 시각이 실제로 '오늘'일 때만 대체한다
+                    # (장기 연휴 등으로 오래된 스냅샷만 남아있는 경우는 무시).
                     ext_close = self._extract_close_series(extended, ticker)
                     if ext_close is not None and self._is_timestamp_today(ext_close.index[-1], today_et):
-                        current = ext_close.iloc[-1]
-                        if today_close and today_close > 0:
-                            after_hours_change = float((current / today_close - 1) * 100)
+                        if last_bar_is_today:
+                            # 애프터마켓: 기준가(전일 종가)는 유지하고 현재가만 연장거래가로 교체
+                            current = ext_close.iloc[-1]
+                            if today_close and today_close > 0:
+                                after_hours_change = float((current / today_close - 1) * 100)
+                        else:
+                            # 프리마켓: 기준가를 '마지막 거래일 종가'로 전환하고 현재가는 연장거래가
+                            reference = daily_close.iloc[-1]
+                            current = ext_close.iloc[-1]
 
                 if reference and reference > 0:
                     changes[ticker] = {
