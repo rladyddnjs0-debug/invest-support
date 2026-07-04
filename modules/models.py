@@ -571,9 +571,9 @@ class QuantScreener:
                     if lppl_res:
                         danger_score = lppl_res['danger_score']
                     
-                    # 2. 변동성 계산 (최근 20일 표준편차 기반)
+                    # 2. 변동성 계산 (최근 20일 표준편차 기반, 0에 가까운 값은 하한 적용)
                     returns = hist['Close'].pct_change().dropna()
-                    volatility = returns.tail(20).std()
+                    volatility = max(returns.tail(20).std(), self.analysis_model.port_config.min_volatility_floor)
             except Exception as e:
                 logger.debug(f"Risk analysis failed for {ticker}: {e}")
             

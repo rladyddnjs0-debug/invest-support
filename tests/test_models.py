@@ -157,3 +157,45 @@ def test_run_screening_sector_neutral_na_string_sector_uses_full_pool_rank():
 
     assert a2_sector_neutral_score == pytest.approx(a2_full_pool_score)
     assert a2_sector_neutral_score < 100.0
+
+
+class _FakeLoader:
+    def __init__(self, histories):
+        self._histories = histories
+
+    def get_market_history(self, ticker, period="1y"):
+        return self._histories.get(ticker)
+
+
+def _flat_price_history(periods=25, price=100.0):
+    dates = pd.date_range(start="2023-01-01", periods=periods)
+    return pd.DataFrame({'Close': [price] * periods}, index=dates)
+
+
+def _volatile_price_history(periods=25):
+    dates = pd.date_range(start="2023-01-01", periods=periods)
+    prices = [100.0]
+    for i in range(1, periods):
+        prices.append(prices[-1] * (1.05 if i % 2 == 0 else 0.95))
+    return pd.DataFrame({'Close': prices}, index=dates)
+
+
+def test_calculate_stock_weights_applies_volatility_floor():
+    screener = QuantScreener()
+    top_df = pd.DataFrame({
+        'Ticker': ['FLAT', 'NORMAL'],
+        'FinalScore': [80.0, 80.0],
+        'Price': [100.0, 100.0],
+    })
+    loader = _FakeLoader({
+        'FLAT': _flat_price_history(),
+        'NORMAL': _volatile_price_history(),
+    })
+
+    result = screener.calculate_stock_weights(top_df, total_target_weight_pct=100.0, loader=loader)
+
+    floor_pct = screener.analysis_model.port_config.min_volatility_floor * 100
+    flat_vol = result.loc[result['Ticker'] == 'FLAT', 'Volatility'].iloc[0]
+    normal_vol = result.loc[result['Ticker'] == 'NORMAL', 'Volatility'].iloc[0]
+    assert flat_vol == pytest.approx(floor_pct)
+    assert normal_vol > floor_pct
