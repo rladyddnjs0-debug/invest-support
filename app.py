@@ -1423,6 +1423,11 @@ elif menu == "🗺️ 마켓 히트맵":
 
         heat_df['MarketCapLabel'] = heat_df['MarketCap'].apply(format_market_cap)
 
+        heat_df['PER'] = pd.to_numeric(heat_df.get('PER'), errors='coerce')
+        heat_df['ROE'] = pd.to_numeric(heat_df.get('ROE'), errors='coerce')
+        heat_df['PERLabel'] = heat_df['PER'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+        heat_df['ROELabel'] = heat_df['ROE'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+
         if heat_df.empty:
             st.error("시가총액 데이터가 유효한 종목이 없어 히트맵을 그릴 수 없습니다.")
         else:
@@ -1432,7 +1437,7 @@ elif menu == "🗺️ 마켓 히트맵":
                 path=[px.Constant("S&P 500"), 'Sector', 'DisplayName'],
                 values='MarketCap',
                 color='DayChange',
-                custom_data=['DayChangeLabel', 'MarketCapLabel'],
+                custom_data=['DayChangeLabel', 'MarketCapLabel', 'PERLabel', 'ROELabel'],
                 color_continuous_scale='RdYlGn',
                 range_color=[-max_abs_change, max_abs_change],
                 color_continuous_midpoint=0,
@@ -1442,7 +1447,7 @@ elif menu == "🗺️ 마켓 히트맵":
             fig_heatmap.update_traces(
                 texttemplate="%{label}<br>%{customdata[0]}",
                 textposition="middle center",
-                hovertemplate="<b>%{label}</b><br>시가총액: %{customdata[1]}<br>당일등락률: %{customdata[0]}<extra></extra>"
+                hovertemplate="<b>%{label}</b><br>시가총액: %{customdata[1]}<br>당일등락률: %{customdata[0]}<br>PER: %{customdata[2]}<br>ROE: %{customdata[3]}<extra></extra>"
             )
             fig_heatmap.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=700)
             st.plotly_chart(fig_heatmap, width="stretch")
