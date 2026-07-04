@@ -146,8 +146,9 @@ class DataLoader:
                 
                 if df_krx is not None:
                     df_cap = krx_stock.get_market_cap_by_ticker(date_str, market="ALL")
-                    six_months_ago = (target_date - timedelta(days=180)).strftime("%Y%m%d")
-                    df_momentum = krx_stock.get_market_price_change_by_ticker(six_months_ago, date_str)
+                    momentum_start = (target_date - timedelta(days=395)).strftime("%Y%m%d")
+                    momentum_end = (target_date - timedelta(days=30)).strftime("%Y%m%d")
+                    df_momentum = krx_stock.get_market_price_change_by_ticker(momentum_start, momentum_end)
                     
                     for full_ticker in tickers:
                         pure_ticker = full_ticker.split('.')[0]

@@ -393,3 +393,35 @@ def test_get_stock_fundamentals_us_momentum_falls_back_when_series_too_short(moc
 
     # 시계열이 너무 짧으면 기존과 동일하게 52WeekChange 폴백을 사용해야 함
     assert res.loc[res['Ticker'] == 'AAPL', 'Momentum'].iloc[0] == pytest.approx(30.0)
+
+
+@patch('yfinance.download')
+@patch('yfinance.Ticker')
+def test_get_stock_fundamentals_kr_momentum_uses_12_1_window(mock_ticker, mock_download, clean_data_loader):
+    loader = clean_data_loader
+    target_date = datetime.now()
+
+    df_kospi = pd.DataFrame({
+        'PER': [10.0], 'PBR': [1.0], 'EPS': [1000.0], 'BPS': [10000.0], '종가': [70000.0]
+    }, index=['005930'])
+    df_kosdaq = pd.DataFrame(columns=df_kospi.columns)
+    df_cap = pd.DataFrame({'시가총액': [400000000000000]}, index=['005930'])
+    df_momentum = pd.DataFrame({'등락률': [7.5]}, index=['005930'])
+
+    with patch('pykrx.stock.get_market_fundamental_by_ticker') as mock_fund, \
+         patch('pykrx.stock.get_market_cap_by_ticker') as mock_cap, \
+         patch('pykrx.stock.get_market_price_change_by_ticker') as mock_mom, \
+         patch('pykrx.stock.get_market_ticker_name') as mock_name:
+        mock_fund.side_effect = lambda date_str, market: df_kospi if market == "KOSPI" else df_kosdaq
+        mock_cap.return_value = df_cap
+        mock_mom.return_value = df_momentum
+        mock_name.return_value = "Samsung Electronics"
+
+        res = loader.get_stock_fundamentals(tickers=["005930.KS"], market_name="kr")
+
+        assert not res.empty
+        assert res.iloc[0]['Momentum'] == 7.5
+
+        expected_start = (target_date - timedelta(days=395)).strftime("%Y%m%d")
+        expected_end = (target_date - timedelta(days=30)).strftime("%Y%m%d")
+        mock_mom.assert_called_once_with(expected_start, expected_end)
