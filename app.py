@@ -56,6 +56,20 @@ def tradingview_widget(symbol, height=400, interval="5"):
     """
     components.html(widget_html, height=height)
 
+def render_yield_chart(name, height=400):
+    """야후 파이낸스 5분봉 데이터를 이용한 국채 수익률 실시간 차트 (TradingView 위젯 미지원 심볼 대체용)"""
+    data = loader.get_market_history(name, period="1d", interval="5m")
+    if data is not None and not data.empty:
+        curr = data['Close'].iloc[-1]
+        chg = curr - data['Close'].iloc[0]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', line=dict(color='#ffdd57')))
+        fig.update_layout(template="plotly_dark", height=height, margin=dict(l=10, r=10, t=40, b=10),
+                           title=f"{curr:.3f}% ({chg:+.3f}%p)")
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.error("데이터를 가져올 수 없습니다.")
+
 @st.cache_data(ttl=3600*24) # 24시간 캐시
 def get_cached_historical_per(ticker, force_download=False):
     """역사적 PER 계산 결과를 캐싱하여 API 호출 최소화"""
@@ -1517,14 +1531,25 @@ elif menu == "🚀 실시간 마켓 모니터":
     col4, col5, col6 = st.columns(3)
 
     with col4:
-        st.warning("미국채 10년물 수익률 (10Y, 일별)")
-        tradingview_widget("FRED:DGS10", height=400, interval="D")
+        st.warning("미국채 30년물 수익률 (30Y)")
+        render_yield_chart("US30Y", height=400)
     with col5:
-        st.warning("미국채 2년물 수익률 (2Y, 일별)")
-        tradingview_widget("FRED:DGS2", height=400, interval="D")
+        st.warning("미국채 10년물 수익률 (10Y)")
+        render_yield_chart("US10Y", height=400)
     with col6:
+        st.warning("미국채 5년물 수익률 (5Y)")
+        render_yield_chart("US5Y", height=400)
+
+    col_vix, col_oil, col_gold = st.columns(3)
+    with col_vix:
         st.error("변동성 지수 (VIX)")
         tradingview_widget("CAPITALCOM:VIX", height=400)
+    with col_oil:
+        st.error("WTI 유가 (Oil)")
+        tradingview_widget("CAPITALCOM:OIL_CRUDE", height=400)
+    with col_gold:
+        st.error("국제 금 시세 (Gold)")
+        tradingview_widget("CAPITALCOM:GOLD", height=400)
 
     # --- 3섹션: 통화 및 원자재 ---
     st.markdown("---")

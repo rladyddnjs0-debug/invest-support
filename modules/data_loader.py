@@ -44,7 +44,7 @@ class DataLoader:
             
         self.tickers = {
             "S&P500": "^GSPC", "NASDAQ": "^IXIC", "KOSPI": "^KS11", "KOSDAQ": "^KQ11",
-            "US10Y": "^TNX", "US2Y": "^IRX", "US30Y": "^TYX", "DXY": "DX-Y.NYB", "GOLD": "GC=F",
+            "US10Y": "^TNX", "US2Y": "^IRX", "US30Y": "^TYX", "US5Y": "^FVX", "DXY": "DX-Y.NYB", "GOLD": "GC=F",
             "OIL": "CL=F", "TIP": "TIP", "IEF": "IEF", "USD_KRW": "USDKRW=X",
             "BTC": "BTC-USD", "VIX": "^VIX", "HYG": "HYG"
         }
@@ -308,16 +308,28 @@ class DataLoader:
                 return pd.read_csv(file_path, index_col=0, parse_dates=True)
 
         if should_download:
-            try:
-                logger.info(f"Downloading historical data for {ticker_symbol} (period={period}, interval={interval})...")
-                data = yf.download(ticker_symbol, period=period, interval=interval)
-                if not data.empty:
-                    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-                    data.to_csv(file_path)
-                    return data
-            except Exception as e:
-                logger.error(f"Error downloading {ticker_symbol} history: {e}")
-                return None
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Downloading historical data for {ticker_symbol} (period={period}, interval={interval})...")
+                    data = yf.download(ticker_symbol, period=period, interval=interval)
+                    if not data.empty:
+                        if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+                        data.to_csv(file_path)
+                        return data
+                    break  # 빈 데이터는 재시도 없이 종료 (심볼 자체에 데이터가 없는 경우)
+                except Exception as e:
+                    if "Too Many Requests" in str(e) and attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 5 + random.random()
+                        logger.warning(f"Rate limited for {ticker_symbol}, waiting {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Error downloading {ticker_symbol} history: {e}")
+
+            # 재시도 후에도 실패 시, 기존 캐시가 있다면 만료됐더라도 반환 (완전 실패보다 낫음)
+            if os.path.exists(file_path):
+                logger.warning(f"Returning stale cache for {ticker_symbol} after download failure.")
+                return pd.read_csv(file_path, index_col=0, parse_dates=True)
         return None
 
     def get_sector_data(self, period="5y"):
