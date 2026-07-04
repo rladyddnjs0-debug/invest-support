@@ -1517,11 +1517,11 @@ elif menu == "🚀 실시간 마켓 모니터":
     col4, col5, col6 = st.columns(3)
 
     with col4:
-        st.warning("미국채 10년물 수익률 (10Y)")
-        tradingview_widget("BLACKBULL:US10Y", height=400)
+        st.warning("미국채 10년물 수익률 (10Y, 일별)")
+        tradingview_widget("FRED:DGS10", height=400, interval="D")
     with col5:
-        st.warning("미국채 2년물 수익률 (2Y)")
-        tradingview_widget("BLACKBULL:US02Y", height=400)
+        st.warning("미국채 2년물 수익률 (2Y, 일별)")
+        tradingview_widget("FRED:DGS2", height=400, interval="D")
     with col6:
         st.error("변동성 지수 (VIX)")
         tradingview_widget("CAPITALCOM:VIX", height=400)
