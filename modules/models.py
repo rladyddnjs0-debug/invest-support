@@ -493,6 +493,9 @@ class QuantScreener:
         # 섹터 중립화 여부에 따라 전체 풀 또는 섹터 그룹 내 백분위 순위를 계산하는 헬퍼.
         # Sector 컬럼이 없으면(예: 실제 업종 데이터가 없는 시장) 전체 풀 기준으로 자동 폴백한다.
         use_sector_groups = sector_neutral and 'Sector' in df_clean.columns
+        if use_sector_groups:
+            # 결측/공백 섹터는 별도 그룹으로 묶어, groupby가 해당 행을 조용히 누락시키는 것을 방지한다
+            df_clean['Sector'] = df_clean['Sector'].replace('', pd.NA).fillna('Unknown')
 
         def pct_rank(col, ascending):
             if use_sector_groups:

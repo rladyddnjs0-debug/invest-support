@@ -114,3 +114,14 @@ def test_run_screening_sector_neutral_without_sector_column_falls_back():
     b1_score = result.loc[result['Ticker'] == 'B1', 'score_value'].iloc[0]
     a1_score = result.loc[result['Ticker'] == 'A1', 'score_value'].iloc[0]
     assert b1_score > a1_score
+
+
+def test_run_screening_sector_neutral_handles_missing_sector_value():
+    screener = QuantScreener()
+    df = _build_two_sector_df()
+    df.loc[df['Ticker'] == 'A2', 'Sector'] = None  # missing sector value
+
+    result = screener.run_screening(df, "Transition (국면 전환)", sector_neutral=True)
+
+    a2_score = result.loc[result['Ticker'] == 'A2', 'score_value'].iloc[0]
+    assert pd.notna(a2_score)
