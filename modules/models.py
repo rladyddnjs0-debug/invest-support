@@ -1,9 +1,11 @@
 import os
 import json
+import time
+import random
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from scipy.optimize import curve_fit
+from datetime import datetime
 from modules.lppl_engine import LPPLEngine
 from modules.config import settings
 from modules.logger import logger

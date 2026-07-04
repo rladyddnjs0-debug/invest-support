@@ -106,6 +106,12 @@ class AIReporter:
 - 감정적인 서술을 배제하고 오직 **데이터 기반의 차갑고 전문적인 어조**를 유지하라.
 - 리포트 제목: [{market_name}] 글로벌 매크로 및 버블 리스크 종합 보고서
 """
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return f"❌ 리포트 생성 중 오류 발생: {str(e)}"
+
     def generate_portfolio_report(self, portfolio_df, rebal_df=None):
         if not self.model:
             return "⚠️ GOOGLE_API_KEY가 설정되지 않았습니다."

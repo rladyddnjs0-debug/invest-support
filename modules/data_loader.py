@@ -228,10 +228,21 @@ class DataLoader:
                             if fwd_eps is None or fwd_eps == 0:
                                 fwd_eps = info.get('trailingEps', 0)
                                 
+                            # PER 데이터 추출 (Trailing -> Forward 순으로 시도)
+                            per = info.get('trailingPE')
+                            if per is None or per == 0:
+                                per = info.get('forwardPE', 0)
+
+                            # PBR 데이터 추출 (없으면 PBR = PER * ROE 항등식으로 유도)
+                            pbr = info.get('priceToBook')
+                            if pbr is None or pbr == 0:
+                                roe_raw = info.get('returnOnEquity', 0) or 0
+                                pbr = (per * roe_raw) if (per and roe_raw) else 0
+
                             data = {
                                 'Ticker': ticker, 'Name': info.get('shortName', ticker), 'Sector': info.get('sector', 'N/A'),
                                 'Price': curr_price if curr_price > 0 else info.get('currentPrice', 0),
-                                'PER': info.get('trailingPE', 0), 'PBR': info.get('priceToBook', 0),
+                                'PER': per, 'PBR': pbr,
                                 'ROE': info.get('returnOnEquity', 0) * 100, 'ProfitMargin': info.get('profitMargins', 0) * 100,
                                 'RevenueGrowth': info.get('revenueGrowth', 0) * 100, 'MarketCap': info.get('marketCap', 0),
                                 'Momentum': mom if mom != 0 else (info.get('52WeekChange', 0) * 100),
@@ -268,13 +279,13 @@ class DataLoader:
             result_df.to_csv(cache_path, index=False)
             logger.info(f"Saved {market_name} fundamentals ({len(result_df)} records) to cache.")
         return result_df
-        df = self.get_stock_fundamentals(tickers, market_name=market_name)
-        if df.empty:
-            return df
-            
-        # 백테스트 시점의 모멘텀을 시뮬레이션하기 위해 과거 가격 데이터를 활용할 수 있습니다.
-        # 여기서는 우선 인터페이스 호환성을 위해 현재 데이터를 반환합니다.
-        return df
+
+    def get_historical_fundamentals(self, tickers, base_date, market_name="us"):
+        """
+        백테스트용 과거 시점 펀더멘털 데이터.
+        과거 시점 재무제표 재구성 대신, 인터페이스 호환을 위해 현재 펀더멘털 데이터를 반환합니다.
+        """
+        return self.get_stock_fundamentals(tickers, market_name=market_name)
 
     def get_market_history(self, name, period="5y", interval="1d", force_download=False):
         ticker_symbol = self.tickers.get(name, name)

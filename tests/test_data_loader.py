@@ -124,8 +124,8 @@ def test_get_market_history(mock_download, clean_data_loader):
     assert mock_download.call_count == 1
     assert len(res1) == 3
     
-    # 캐시 파일이 저장되었는지 확인
-    cache_file = os.path.join(loader.data_dir, "s&p500_history.csv")
+    # 캐시 파일이 저장되었는지 확인 (인터벌별로 파일명이 분리됨, 기본 interval="1d")
+    cache_file = os.path.join(loader.data_dir, "s&p500_1d_history.csv")
     assert os.path.exists(cache_file)
     
     # 두 번째 로드 (다운로드하지 않고 캐시에서 로드)
