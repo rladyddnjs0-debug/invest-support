@@ -5,7 +5,7 @@ import os
 import plotly.graph_objects as go
 import plotly.express as px
 from modules.data_loader import DataLoader
-from modules.models import AnalysisModel, QuantScreener
+from modules.models import AnalysisModel, QuantScreener, resolve_regime_choice
 from modules.ai_reporter import AIReporter
 from modules.backtester import QuantBacktester
 from datetime import datetime
@@ -1050,11 +1050,7 @@ elif menu == "🔍 종목 스크리너":
     
     st.sidebar.header("⚙️ 스크리닝 설정")
     market_type = st.sidebar.radio("대상 시장", ["US (S&P500)", "KR (KOSPI 200)"])
-    
-    # 레짐 수동 선택 또는 자동 연동 (여기선 간단히 선택지로 제공)
-    regime_choice = st.sidebar.selectbox("현재 시장 레짐 (가중치 반영)", 
-                                        ["Risk-on (안정 성장)", "Risk-off (위험 관리)", "Transition (국면 전환)"])
-    
+
     market_name_key = "us"
     if market_type == "US (S&P500)":
         with st.spinner('S&P 500 종목 리스트를 가져오는 중...'):
@@ -1064,6 +1060,26 @@ elif menu == "🔍 종목 스크리너":
         with st.spinner('KOSPI 200 종목 리스트를 가져오는 중...'):
             target_tickers = loader.get_kospi200_tickers()
             market_name_key = "kr"
+
+    # 레짐 자동 계산 (리밸런싱 페이지와 동일한 방식, 실패 시 수동 선택으로 폴백)
+    ref_index = "^GSPC" if market_name_key == "us" else "^KS11"
+    ref_data = loader.get_market_history(ref_index, period="6mo")
+    auto_regime = None
+    if ref_data is not None and not ref_data.empty:
+        ref_attr = engine.calculate_attractiveness(ref_data['Close'], None)
+        auto_regime = ref_attr['regime'] if ref_attr else None
+
+    use_manual_regime = st.sidebar.checkbox("🔧 레짐 수동 지정", value=False)
+    if not auto_regime:
+        st.sidebar.warning("레짐 자동 계산 실패 — 수동으로 선택해주세요.")
+    manual_regime_choice = st.sidebar.selectbox(
+        "현재 시장 레짐 (가중치 반영)",
+        ["Risk-on (안정 성장)", "Risk-off (위험 관리)", "Transition (국면 전환)"],
+        disabled=(bool(auto_regime) and not use_manual_regime),
+    )
+    regime_choice = resolve_regime_choice(auto_regime, use_manual_regime, manual_regime_choice)
+    if auto_regime and not use_manual_regime:
+        st.sidebar.info(f"자동 계산된 레짐: **{regime_choice}**")
         
     st.subheader(f"📊 {market_type} 주요 종목 분석")
     
