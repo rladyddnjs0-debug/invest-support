@@ -7,6 +7,7 @@ import requests
 import time
 import random
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pykrx import stock as krx_stock
 from abc import ABC, abstractmethod
 
@@ -332,28 +333,70 @@ class DataLoader:
                 return pd.read_csv(file_path, index_col=0, parse_dates=True)
         return None
 
+    def _is_regular_market_hours(self):
+        """미국 동부시간 기준 정규장(평일 09:30~16:00 ET) 여부. 공휴일은 반영하지 않는 근사치."""
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        if now_et.weekday() >= 5:  # 토(5)/일(6)
+            return False
+        open_time = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        close_time = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+        return open_time <= now_et <= close_time
+
+    @staticmethod
+    def _extract_close_series(data, ticker):
+        """배치 다운로드 결과(단일/MultiIndex 컬럼 모두 대응)에서 특정 티커의 Close 시리즈 추출."""
+        if data is None or data.empty:
+            return None
+        if isinstance(data.columns, pd.MultiIndex):
+            if ticker not in data.columns.levels[0]:
+                return None
+            close = data[ticker]['Close'].dropna()
+        else:
+            close = data['Close'].dropna()
+        return close if len(close) > 0 else None
+
     def get_daily_changes(self, tickers):
         """
-        전 종목 당일 등락률(%)을 배치 1회 호출로 계산.
+        전 종목 당일 등락률(%)을 계산.
+        정규장 시간에는 (최근 정규장 종가 / 전일 정규장 종가)로 계산하고,
+        프리마켓/애프터마켓 시간에는 연장거래 체결가를 가장 최근 정규장 종가와 비교하여 반영한다.
         시총/섹터 등 정적 정보는 포함하지 않으며, 데이터가 없는 티커는 결과에서 제외된다.
         """
         try:
-            data = yf.download(tickers, period="2d", interval="1d", progress=False, group_by='ticker')
+            daily = yf.download(tickers, period="2d", interval="1d", progress=False, group_by='ticker')
         except Exception as e:
             logger.error(f"Batch daily change download failed: {e}")
             return {}
 
+        is_regular_hours = self._is_regular_market_hours()
+
+        extended = None
+        if not is_regular_hours:
+            try:
+                extended = yf.download(tickers, period="1d", interval="1m", prepost=True, progress=False, group_by='ticker')
+            except Exception as e:
+                logger.warning(f"Extended-hours price fetch failed, using regular session close only: {e}")
+
         changes = {}
         for ticker in tickers:
             try:
-                if isinstance(data.columns, pd.MultiIndex):
-                    if ticker not in data.columns.levels[0]:
+                daily_close = self._extract_close_series(daily, ticker)
+                if daily_close is None:
+                    continue
+
+                if is_regular_hours:
+                    if len(daily_close) < 2:
                         continue
-                    t_close = data[ticker]['Close'].dropna()
+                    reference, current = daily_close.iloc[-2], daily_close.iloc[-1]
                 else:
-                    t_close = data['Close'].dropna()
-                if len(t_close) >= 2:
-                    changes[ticker] = float((t_close.iloc[-1] / t_close.iloc[-2] - 1) * 100)
+                    reference = daily_close.iloc[-1]
+                    current = reference
+                    ext_close = self._extract_close_series(extended, ticker)
+                    if ext_close is not None:
+                        current = ext_close.iloc[-1]
+
+                if reference and reference > 0:
+                    changes[ticker] = float((current / reference - 1) * 100)
             except Exception:
                 continue
         return changes

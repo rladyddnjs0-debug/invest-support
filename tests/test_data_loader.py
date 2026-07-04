@@ -151,7 +151,8 @@ def test_get_yield_spread(mock_download, clean_data_loader):
 
 
 @patch('yfinance.download')
-def test_get_daily_changes(mock_download, clean_data_loader):
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=True)
+def test_get_daily_changes(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
 
     mock_df = pd.DataFrame({
@@ -168,7 +169,8 @@ def test_get_daily_changes(mock_download, clean_data_loader):
 
 
 @patch('yfinance.download')
-def test_get_daily_changes_missing_ticker(mock_download, clean_data_loader):
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=True)
+def test_get_daily_changes_missing_ticker(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
 
     # MSFT를 요청했지만 다운로드 결과에는 AAPL만 존재하는 상황
@@ -185,10 +187,54 @@ def test_get_daily_changes_missing_ticker(mock_download, clean_data_loader):
 
 
 @patch('yfinance.download')
-def test_get_daily_changes_download_failure(mock_download, clean_data_loader):
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=True)
+def test_get_daily_changes_download_failure(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
     mock_download.side_effect = Exception("Too Many Requests")
 
     changes = loader.get_daily_changes(["AAPL", "MSFT"])
 
     assert changes == {}
+
+
+@patch('yfinance.download')
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
+def test_get_daily_changes_extended_hours_uses_latest_price(mock_is_regular, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    # 정규장 종가 히스토리: 전전일 150 -> 전일(가장 최근 정규장 종가) 153
+    daily_df = pd.DataFrame({
+        ('AAPL', 'Close'): [150.0, 153.0],
+    }, index=pd.date_range(start="2023-01-01", periods=2))
+    daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    # 애프터마켓 연장거래 체결가: 가장 최근 체결가 160
+    extended_df = pd.DataFrame({
+        ('AAPL', 'Close'): [158.0, 159.0, 160.0],
+    }, index=pd.date_range(start="2023-01-03", periods=3, freq="min"))
+    extended_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    mock_download.side_effect = [daily_df, extended_df]
+
+    changes = loader.get_daily_changes(["AAPL"])
+
+    # 기준가는 가장 최근 정규장 종가(153), 현재가는 연장거래 최신 체결가(160)
+    assert changes["AAPL"] == pytest.approx((160.0 / 153.0 - 1) * 100)
+
+
+@patch('yfinance.download')
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
+def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_reference(mock_is_regular, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    daily_df = pd.DataFrame({
+        ('AAPL', 'Close'): [150.0, 153.0],
+    }, index=pd.date_range(start="2023-01-01", periods=2))
+    daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    # 연장거래 조회는 실패하지만 정규장 종가 기준으로는 계속 동작해야 함
+    mock_download.side_effect = [daily_df, Exception("Too Many Requests")]
+
+    changes = loader.get_daily_changes(["AAPL"])
+
+    assert changes["AAPL"] == pytest.approx(0.0)
