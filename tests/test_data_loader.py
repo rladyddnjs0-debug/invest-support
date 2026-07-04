@@ -166,8 +166,11 @@ def test_get_daily_changes(mock_is_regular, mock_download, clean_data_loader):
 
     changes = loader.get_daily_changes(["AAPL", "MSFT"])
 
-    assert changes["AAPL"] == pytest.approx((153.0 / 150.0 - 1) * 100)
-    assert changes["MSFT"] == pytest.approx((297.0 / 300.0 - 1) * 100)
+    assert changes["AAPL"]["change"] == pytest.approx((153.0 / 150.0 - 1) * 100)
+    assert changes["MSFT"]["change"] == pytest.approx((297.0 / 300.0 - 1) * 100)
+    # 정규장 시간에는 애프터마켓 자체 등락률이 존재하지 않음
+    assert changes["AAPL"]["after_hours_change"] is None
+    assert changes["MSFT"]["after_hours_change"] is None
 
 
 @patch('yfinance.download')
@@ -224,7 +227,9 @@ def test_get_daily_changes_after_hours_uses_previous_close(mock_is_regular, mock
     changes = loader.get_daily_changes(["AAPL"])
 
     # 마지막 봉(153)이 '오늘' 종가이므로, 기준가는 전일 종가(150)여야 하고 현재가는 연장거래 최신가(160)
-    assert changes["AAPL"] == pytest.approx((160.0 / 150.0 - 1) * 100)
+    assert changes["AAPL"]["change"] == pytest.approx((160.0 / 150.0 - 1) * 100)
+    # 애프터마켓 자체 등락률은 '금일 정규장 종가(153)' 대비로 별도 계산되어야 함
+    assert changes["AAPL"]["after_hours_change"] == pytest.approx((160.0 / 153.0 - 1) * 100)
 
 
 @patch('yfinance.download')
@@ -252,7 +257,9 @@ def test_get_daily_changes_pre_market_uses_previous_close(mock_is_regular, mock_
     changes = loader.get_daily_changes(["AAPL"])
 
     # 마지막 봉(150)이 '전일' 종가이므로 그대로 기준가로 사용하고, 현재가는 연장거래 최신가(152)
-    assert changes["AAPL"] == pytest.approx((152.0 / 150.0 - 1) * 100)
+    assert changes["AAPL"]["change"] == pytest.approx((152.0 / 150.0 - 1) * 100)
+    # 프리마켓에는 비교 대상인 '금일 정규장 종가'가 아직 없으므로 애프터마켓 등락률은 None
+    assert changes["AAPL"]["after_hours_change"] is None
 
 
 @patch('yfinance.download')
@@ -273,4 +280,5 @@ def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_reference(
 
     changes = loader.get_daily_changes(["AAPL"])
 
-    assert changes["AAPL"] == pytest.approx(0.0)
+    assert changes["AAPL"]["change"] == pytest.approx(0.0)
+    assert changes["AAPL"]["after_hours_change"] is None

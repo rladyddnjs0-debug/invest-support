@@ -358,10 +358,17 @@ class DataLoader:
     def get_daily_changes(self, tickers):
         """
         전 종목 당일 등락률(%)을 계산.
-        정규장 시간에는 (현재 정규장가 / 전일 정규장 종가)로 계산하고,
-        프리마켓/애프터마켓 시간에는 연장거래 체결가를 '전일 정규장 종가'와 비교하여 반영한다.
-        (애프터마켓도 금일 종가가 아닌 전일 종가를 기준으로 삼아, 장 마감 시점에 등락률이
-        리셋되지 않고 하루 전체의 누적 변동을 계속 보여준다.)
+        반환 형식: {ticker: {'change': float, 'after_hours_change': float 또는 None}}
+
+        'change'는 항상 '전일 정규장 종가'를 기준으로 계산한다 (정규장 시간에는 현재 정규장가,
+        프리마켓/애프터마켓 시간에는 연장거래 체결가를 전일 종가와 비교하여 반영한다). 애프터마켓도
+        금일 종가가 아닌 전일 종가를 기준으로 삼아, 장 마감 시점에 등락률이 리셋되지 않고 하루
+        전체의 누적 변동을 계속 보여준다.
+
+        'after_hours_change'는 애프터마켓(정규장 종료 후) 시간에만 별도로, 연장거래 체결가를
+        '금일 정규장 종가'와 비교한 애프터마켓 자체 변동률이다. 그 외 시간(정규장 중, 프리마켓)에는
+        비교 대상이 되는 '금일 정규장 종가'가 아직 없으므로 None이다.
+
         시총/섹터 등 정적 정보는 포함하지 않으며, 데이터가 없는 티커는 결과에서 제외된다.
         """
         try:
@@ -387,6 +394,7 @@ class DataLoader:
                 if daily_close is None:
                     continue
 
+                after_hours_change = None
                 if is_regular_hours:
                     if len(daily_close) < 2:
                         continue
@@ -395,10 +403,12 @@ class DataLoader:
                     # 마지막 정규장 봉이 '오늘'이면(애프터마켓) 그 전날 종가를, 그렇지 않으면
                     # (프리마켓, 아직 오늘 봉이 없음) 마지막 봉을 전일 종가로 사용한다.
                     last_bar_is_today = daily_close.index[-1].date() == today_et
+                    today_close = None
                     if last_bar_is_today:
                         if len(daily_close) < 2:
                             continue
                         reference = daily_close.iloc[-2]
+                        today_close = daily_close.iloc[-1]
                     else:
                         reference = daily_close.iloc[-1]
 
@@ -406,9 +416,14 @@ class DataLoader:
                     ext_close = self._extract_close_series(extended, ticker)
                     if ext_close is not None:
                         current = ext_close.iloc[-1]
+                        if today_close and today_close > 0:
+                            after_hours_change = float((current / today_close - 1) * 100)
 
                 if reference and reference > 0:
-                    changes[ticker] = float((current / reference - 1) * 100)
+                    changes[ticker] = {
+                        'change': float((current / reference - 1) * 100),
+                        'after_hours_change': after_hours_change
+                    }
             except Exception:
                 continue
         return changes
