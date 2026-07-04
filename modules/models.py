@@ -468,12 +468,12 @@ class QuantScreener:
         }
         self.analysis_model = AnalysisModel()
 
-    def run_screening(self, df, regime):
+    def run_screening(self, df, regime, sector_neutral=False):
         if df.empty: return df
-        
+
         # 1. 밸류 데이터 전처리 (적자 기업 및 결측치 처리)
         df_clean = df.copy()
-        
+
         # 필수 컬럼 존재 확인 및 수치화
         required_cols = ['PER', 'PBR', 'ROE', 'Momentum', 'RevenueGrowth', 'ProfitMargin']
         for col in required_cols:
@@ -490,24 +490,33 @@ class QuantScreener:
                 max_val = df_clean.loc[~mask, col].max() if not df_clean.loc[~mask, col].empty else 100
                 df_clean.loc[mask, col] = max_val + 100
 
+        # 섹터 중립화 여부에 따라 전체 풀 또는 섹터 그룹 내 백분위 순위를 계산하는 헬퍼.
+        # Sector 컬럼이 없으면(예: 실제 업종 데이터가 없는 시장) 전체 풀 기준으로 자동 폴백한다.
+        use_sector_groups = sector_neutral and 'Sector' in df_clean.columns
+
+        def pct_rank(col, ascending):
+            if use_sector_groups:
+                return df_clean.groupby('Sector')[col].rank(ascending=ascending, pct=True)
+            return df_clean[col].rank(ascending=ascending, pct=True)
+
         # 2. 랭킹 산출 (낮을수록 점수가 높아야 하므로 ascending=False 적용)
         # 단, 위에서 처리한 '나쁜 값'들이 가장 큰 값을 가지므로 rank(ascending=False) 시 최하위 점수를 받게 됨
         df_clean['score_value'] = (
-            df_clean['PER'].rank(ascending=False, pct=True) * 50 + 
-            df_clean['PBR'].rank(ascending=False, pct=True) * 50
+            pct_rank('PER', False) * 50 +
+            pct_rank('PBR', False) * 50
         )
-        
+
         # 퀄리티 및 성장성 (높을수록 좋으므로 ascending=True)
         df_clean['score_quality'] = (
-            df_clean['ROE'].rank(ascending=True, pct=True) * 50 + 
-            df_clean['ProfitMargin'].rank(ascending=True, pct=True) * 50
+            pct_rank('ROE', True) * 50 +
+            pct_rank('ProfitMargin', True) * 50
         )
-        df_clean['score_growth'] = df_clean['RevenueGrowth'].rank(ascending=True, pct=True) * 100
-        
+        df_clean['score_growth'] = pct_rank('RevenueGrowth', True) * 100
+
         if 'Momentum' in df_clean.columns:
-            df_clean['score_momentum'] = df_clean['Momentum'].rank(ascending=True, pct=True) * 100
+            df_clean['score_momentum'] = pct_rank('Momentum', True) * 100
         else:
-            df_clean['score_momentum'] = 50 
+            df_clean['score_momentum'] = 50
 
         # 3. 레짐별 가중치 합산
         w = self.weights.get(regime, self.weights["Transition (국면 전환)"])

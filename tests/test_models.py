@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from modules.models import AnalysisModel
+from modules.models import AnalysisModel, QuantScreener
 
 @pytest.fixture
 def mock_price_data():
@@ -45,11 +45,72 @@ def test_calculate_target_weight():
     # 매력도 60, 위험도 30 (정상) -> 100% 반영
     w1 = model.calculate_target_weight(60.0, 30.0)
     assert w1 == 60.0
-    
+
     # 매력도 60, 위험도 75 (경고) -> 페널티 적용 (0.5배 등)
     w2 = model.calculate_target_weight(60.0, 75.0)
     assert w2 < 60.0
-    
+
     # 매력도 60, 위험도 90 (위험) -> 최대 20% 제한
     w3 = model.calculate_target_weight(60.0, 90.0)
     assert w3 <= 20.0
+
+
+def _build_two_sector_df():
+    """
+    Sector A: PER 10, 20, 30 (종목 A1, A2, A3)
+    Sector B: PER 5, 15, 25 (종목 B1, B2, B3)
+    전체 풀 기준 PER 오름차순: B1(5) < A1(10) < B2(15) < A2(20) < B3(25) < A3(30)
+    -> A1은 전체 6개 중 2번째로 저PER(전체 기준 상위권)이지만,
+       Sector A 안에서는 가장 저PER(그룹 내 1위)이므로 sector_neutral일 때 더 높은 score_value를 받아야 한다.
+    """
+    return pd.DataFrame({
+        'Ticker': ['A1', 'A2', 'A3', 'B1', 'B2', 'B3'],
+        'Sector': ['A', 'A', 'A', 'B', 'B', 'B'],
+        'PER': [10.0, 20.0, 30.0, 5.0, 15.0, 25.0],
+        'PBR': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        'ROE': [10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+        'ProfitMargin': [10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+        'RevenueGrowth': [5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+        'Momentum': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    })
+
+
+def test_run_screening_default_matches_full_pool_ranking():
+    screener = QuantScreener()
+    df = _build_two_sector_df()
+
+    result = screener.run_screening(df, "Transition (국면 전환)")
+
+    # 전체 풀 기준: B1(PER 5)이 가장 저PER이므로 score_value가 가장 높아야 함
+    b1_score = result.loc[result['Ticker'] == 'B1', 'score_value'].iloc[0]
+    a1_score = result.loc[result['Ticker'] == 'A1', 'score_value'].iloc[0]
+    assert b1_score > a1_score
+
+
+def test_run_screening_sector_neutral_ranks_within_group():
+    screener = QuantScreener()
+    df = _build_two_sector_df()
+
+    result = screener.run_screening(df, "Transition (국면 전환)", sector_neutral=True)
+
+    # 섹터 중립화: A1(Sector A 내 최저 PER)이 A2, A3보다 score_value가 높아야 함
+    a1_score = result.loc[result['Ticker'] == 'A1', 'score_value'].iloc[0]
+    a2_score = result.loc[result['Ticker'] == 'A2', 'score_value'].iloc[0]
+    a3_score = result.loc[result['Ticker'] == 'A3', 'score_value'].iloc[0]
+    assert a1_score > a2_score > a3_score
+
+    # Sector A 내 최저 PER(A1)과 Sector B 내 최저 PER(B1)은 각자 그룹의 1등이므로 동점(100점)이어야 함
+    b1_score = result.loc[result['Ticker'] == 'B1', 'score_value'].iloc[0]
+    assert a1_score == pytest.approx(b1_score)
+
+
+def test_run_screening_sector_neutral_without_sector_column_falls_back():
+    screener = QuantScreener()
+    df = _build_two_sector_df().drop(columns=['Sector'])
+
+    # Sector 컬럼이 없어도 예외 없이 전체 풀 기준으로 폴백해야 함
+    result = screener.run_screening(df, "Transition (국면 전환)", sector_neutral=True)
+
+    b1_score = result.loc[result['Ticker'] == 'B1', 'score_value'].iloc[0]
+    a1_score = result.loc[result['Ticker'] == 'A1', 'score_value'].iloc[0]
+    assert b1_score > a1_score
