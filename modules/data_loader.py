@@ -358,8 +358,10 @@ class DataLoader:
     def get_daily_changes(self, tickers):
         """
         전 종목 당일 등락률(%)을 계산.
-        정규장 시간에는 (최근 정규장 종가 / 전일 정규장 종가)로 계산하고,
-        프리마켓/애프터마켓 시간에는 연장거래 체결가를 가장 최근 정규장 종가와 비교하여 반영한다.
+        정규장 시간에는 (현재 정규장가 / 전일 정규장 종가)로 계산하고,
+        프리마켓/애프터마켓 시간에는 연장거래 체결가를 '전일 정규장 종가'와 비교하여 반영한다.
+        (애프터마켓도 금일 종가가 아닌 전일 종가를 기준으로 삼아, 장 마감 시점에 등락률이
+        리셋되지 않고 하루 전체의 누적 변동을 계속 보여준다.)
         시총/섹터 등 정적 정보는 포함하지 않으며, 데이터가 없는 티커는 결과에서 제외된다.
         """
         try:
@@ -369,6 +371,7 @@ class DataLoader:
             return {}
 
         is_regular_hours = self._is_regular_market_hours()
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
 
         extended = None
         if not is_regular_hours:
@@ -389,7 +392,16 @@ class DataLoader:
                         continue
                     reference, current = daily_close.iloc[-2], daily_close.iloc[-1]
                 else:
-                    reference = daily_close.iloc[-1]
+                    # 마지막 정규장 봉이 '오늘'이면(애프터마켓) 그 전날 종가를, 그렇지 않으면
+                    # (프리마켓, 아직 오늘 봉이 없음) 마지막 봉을 전일 종가로 사용한다.
+                    last_bar_is_today = daily_close.index[-1].date() == today_et
+                    if last_bar_is_today:
+                        if len(daily_close) < 2:
+                            continue
+                        reference = daily_close.iloc[-2]
+                    else:
+                        reference = daily_close.iloc[-1]
+
                     current = reference
                     ext_close = self._extract_close_series(extended, ticker)
                     if ext_close is not None:

@@ -2,6 +2,8 @@ import os
 import pytest
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import patch, MagicMock
 from modules.data_loader import DataLoader
 
@@ -199,13 +201,16 @@ def test_get_daily_changes_download_failure(mock_is_regular, mock_download, clea
 
 @patch('yfinance.download')
 @patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
-def test_get_daily_changes_extended_hours_uses_latest_price(mock_is_regular, mock_download, clean_data_loader):
+def test_get_daily_changes_after_hours_uses_previous_close(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
 
-    # 정규장 종가 히스토리: 전전일 150 -> 전일(가장 최근 정규장 종가) 153
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    yesterday = today - timedelta(days=1)
+
+    # 정규장 종가 히스토리: 전일 150 -> 금일(오늘 막 끝난 정규장 종가) 153
     daily_df = pd.DataFrame({
         ('AAPL', 'Close'): [150.0, 153.0],
-    }, index=pd.date_range(start="2023-01-01", periods=2))
+    }, index=pd.to_datetime([yesterday, today]))
     daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
     # 애프터마켓 연장거래 체결가: 가장 최근 체결가 160
@@ -218,8 +223,36 @@ def test_get_daily_changes_extended_hours_uses_latest_price(mock_is_regular, moc
 
     changes = loader.get_daily_changes(["AAPL"])
 
-    # 기준가는 가장 최근 정규장 종가(153), 현재가는 연장거래 최신 체결가(160)
-    assert changes["AAPL"] == pytest.approx((160.0 / 153.0 - 1) * 100)
+    # 마지막 봉(153)이 '오늘' 종가이므로, 기준가는 전일 종가(150)여야 하고 현재가는 연장거래 최신가(160)
+    assert changes["AAPL"] == pytest.approx((160.0 / 150.0 - 1) * 100)
+
+
+@patch('yfinance.download')
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
+def test_get_daily_changes_pre_market_uses_previous_close(mock_is_regular, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    yesterday = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=1)
+    day_before = yesterday - timedelta(days=1)
+
+    # 오늘 정규장이 아직 열리지 않아, 마지막 정규장 봉은 '전일'이다
+    daily_df = pd.DataFrame({
+        ('AAPL', 'Close'): [148.0, 150.0],
+    }, index=pd.to_datetime([day_before, yesterday]))
+    daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    # 프리마켓 연장거래 체결가: 가장 최근 체결가 152
+    extended_df = pd.DataFrame({
+        ('AAPL', 'Close'): [151.0, 151.5, 152.0],
+    }, index=pd.date_range(start="2023-01-03", periods=3, freq="min"))
+    extended_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    mock_download.side_effect = [daily_df, extended_df]
+
+    changes = loader.get_daily_changes(["AAPL"])
+
+    # 마지막 봉(150)이 '전일' 종가이므로 그대로 기준가로 사용하고, 현재가는 연장거래 최신가(152)
+    assert changes["AAPL"] == pytest.approx((152.0 / 150.0 - 1) * 100)
 
 
 @patch('yfinance.download')
@@ -227,9 +260,12 @@ def test_get_daily_changes_extended_hours_uses_latest_price(mock_is_regular, moc
 def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_reference(mock_is_regular, mock_download, clean_data_loader):
     loader = clean_data_loader
 
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    yesterday = today - timedelta(days=1)
+
     daily_df = pd.DataFrame({
         ('AAPL', 'Close'): [150.0, 153.0],
-    }, index=pd.date_range(start="2023-01-01", periods=2))
+    }, index=pd.to_datetime([yesterday, today]))
     daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
     # 연장거래 조회는 실패하지만 정규장 종가 기준으로는 계속 동작해야 함
