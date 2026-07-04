@@ -36,7 +36,7 @@ class QuantBacktester:
         if hist_fund_df.empty:
             return None, None
             
-        # 4. 스크리닝 (1년 전 시점의 랭킹)
+        # 4. 스크리닝 (오늘 시점 펀더멘털 기준 랭킹)
         screened_df = self.screener.run_screening(hist_fund_df, regime_choice)
         top_10 = screened_df.head(10)
         top_10_tickers = top_10['Ticker'].tolist()

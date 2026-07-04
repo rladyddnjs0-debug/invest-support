@@ -283,7 +283,7 @@ class DataLoader:
 
     def get_historical_fundamentals(self, tickers, base_date, market_name="us"):
         """
-        백테스트용 과거 시점 펀더멘털 데이터.
+        백테스트 화면에서 사용하는 펀더멘털 데이터.
         과거 시점 재무제표 재구성 대신, 인터페이스 호환을 위해 현재 펀더멘털 데이터를 반환합니다.
         """
         return self.get_stock_fundamentals(tickers, market_name=market_name)
