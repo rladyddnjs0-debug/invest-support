@@ -1410,6 +1410,7 @@ elif menu == "🗺️ 마켓 히트맵":
         heat_df['MarketCap'] = pd.to_numeric(heat_df['MarketCap'], errors='coerce').fillna(0)
         heat_df = heat_df[heat_df['MarketCap'] > 0]
         heat_df['DisplayName'] = heat_df['Name'].astype(str) + " (" + heat_df['Ticker'].astype(str) + ")"
+        heat_df['DayChangeLabel'] = heat_df['DayChange'].apply(lambda x: f"{x:+.2f}%")
 
         if heat_df.empty:
             st.error("시가총액 데이터가 유효한 종목이 없어 히트맵을 그릴 수 없습니다.")
@@ -1420,13 +1421,15 @@ elif menu == "🗺️ 마켓 히트맵":
                 path=[px.Constant("S&P 500"), 'Sector', 'DisplayName'],
                 values='MarketCap',
                 color='DayChange',
-                hover_data=[c for c in ['PER', 'ROE'] if c in heat_df.columns],
+                custom_data=['DayChangeLabel'],
+                hover_data=[c for c in ['PER', 'ROE', 'DayChange'] if c in heat_df.columns],
                 color_continuous_scale='RdYlGn',
                 range_color=[-max_abs_change, max_abs_change],
                 color_continuous_midpoint=0,
                 title="섹터/종목별 당일 등락률 (박스 크기: 시가총액)",
                 template="plotly_dark"
             )
+            fig_heatmap.update_traces(texttemplate="%{label}<br>%{customdata[0]}", textposition="middle center")
             fig_heatmap.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=700)
             st.plotly_chart(fig_heatmap, width="stretch")
 
