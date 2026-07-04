@@ -172,3 +172,85 @@ def test_resolve_regime_choice_manual_override_wins():
 def test_resolve_regime_choice_falls_back_to_manual_when_auto_missing():
     result = resolve_regime_choice(None, False, "Transition (국면 전환)")
     assert result == "Transition (국면 전환)"
+
+
+class _FakeLoader:
+    def __init__(self, histories):
+        self._histories = histories
+
+    def get_market_history(self, ticker, period="1y"):
+        return self._histories.get(ticker)
+
+
+def _flat_price_history(periods=25, price=100.0):
+    dates = pd.date_range(start="2023-01-01", periods=periods)
+    return pd.DataFrame({'Close': [price] * periods}, index=dates)
+
+
+def _volatile_price_history(periods=25):
+    dates = pd.date_range(start="2023-01-01", periods=periods)
+    prices = [100.0]
+    for i in range(1, periods):
+        prices.append(prices[-1] * (1.05 if i % 2 == 0 else 0.95))
+    return pd.DataFrame({'Close': prices}, index=dates)
+
+
+def test_calculate_stock_weights_applies_volatility_floor():
+    screener = QuantScreener()
+    top_df = pd.DataFrame({
+        'Ticker': ['FLAT', 'NORMAL'],
+        'FinalScore': [80.0, 80.0],
+        'Price': [100.0, 100.0],
+    })
+    loader = _FakeLoader({
+        'FLAT': _flat_price_history(),
+        'NORMAL': _volatile_price_history(),
+    })
+
+    result = screener.calculate_stock_weights(top_df, total_target_weight_pct=100.0, loader=loader)
+
+    floor_pct = screener.analysis_model.port_config.min_volatility_floor * 100
+    flat_vol = result.loc[result['Ticker'] == 'FLAT', 'Volatility'].iloc[0]
+    normal_vol = result.loc[result['Ticker'] == 'NORMAL', 'Volatility'].iloc[0]
+    assert flat_vol == pytest.approx(floor_pct)
+    assert normal_vol > floor_pct
+
+
+def test_calculate_stock_weights_caps_extreme_weight_and_redistributes():
+    screener = QuantScreener()
+    tickers = ['FLAT'] + [f'NORMAL{i}' for i in range(9)]
+    top_df = pd.DataFrame({
+        'Ticker': tickers,
+        'FinalScore': [80.0] * 10,
+        'Price': [100.0] * 10,
+    })
+    histories = {'FLAT': _flat_price_history()}
+    histories.update({f'NORMAL{i}': _volatile_price_history() for i in range(9)})
+    loader = _FakeLoader(histories)
+
+    result = screener.calculate_stock_weights(top_df, total_target_weight_pct=100.0, loader=loader)
+
+    n = len(tickers)
+    cap = (100.0 / n) * screener.analysis_model.port_config.max_stock_weight_multiple
+    flat_weight = result.loc[result['Ticker'] == 'FLAT', 'RecWeight'].iloc[0]
+
+    assert flat_weight <= cap + 1e-9
+    assert result['RecWeight'].sum() == pytest.approx(100.0)
+
+
+def test_calculate_stock_weights_normal_case_unaffected_by_cap():
+    screener = QuantScreener()
+    tickers = [f'NORMAL{i}' for i in range(5)]
+    top_df = pd.DataFrame({
+        'Ticker': tickers,
+        'FinalScore': [80.0] * 5,
+        'Price': [100.0] * 5,
+    })
+    loader = _FakeLoader({t: _volatile_price_history() for t in tickers})
+
+    result = screener.calculate_stock_weights(top_df, total_target_weight_pct=100.0, loader=loader)
+
+    # 모든 종목의 변동성이 동일하므로 상한에 걸리지 않고 균등 비중(20%)이 나와야 함
+    for t in tickers:
+        w = result.loc[result['Ticker'] == t, 'RecWeight'].iloc[0]
+        assert w == pytest.approx(20.0, abs=0.5)

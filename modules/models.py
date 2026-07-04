@@ -466,6 +466,29 @@ class AnalysisModel:
             
         return round(float(final_weight), 1)
 
+
+def _apply_weight_cap(rec_weights, total_target_weight_pct, max_multiple):
+    """상한을 초과하는 비중을 상한만큼 자르고, 초과분을 상한 미만 종목에 비례 재분배한다."""
+    n = len(rec_weights)
+    if n == 0:
+        return rec_weights
+
+    cap = (total_target_weight_pct / n) * max_multiple
+    weights = rec_weights.copy()
+    for _ in range(5):
+        over_mask = weights > cap
+        if not over_mask.any():
+            break
+        excess = (weights[over_mask] - cap).sum()
+        weights[over_mask] = cap
+        under_mask = ~over_mask
+        under_total = weights[under_mask].sum()
+        if under_total <= 0:
+            break
+        weights[under_mask] += excess * (weights[under_mask] / under_total)
+    return weights
+
+
 class QuantScreener:
     def __init__(self):
         self.config = settings.screener
@@ -579,9 +602,9 @@ class QuantScreener:
                     if lppl_res:
                         danger_score = lppl_res['danger_score']
                     
-                    # 2. 변동성 계산 (최근 20일 표준편차 기반)
+                    # 2. 변동성 계산 (최근 20일 표준편차 기반, 0에 가까운 값은 하한 적용)
                     returns = hist['Close'].pct_change().dropna()
-                    volatility = returns.tail(20).std()
+                    volatility = max(returns.tail(20).std(), self.analysis_model.port_config.min_volatility_floor)
             except Exception as e:
                 logger.debug(f"Risk analysis failed for {ticker}: {e}")
             
@@ -612,7 +635,11 @@ class QuantScreener:
             res_df['RecWeight'] = (res_df['RiskAdjFactor'] / total_factor) * total_target_weight_pct
         else:
             res_df['RecWeight'] = total_target_weight_pct / len(res_df)
-            
+
+        res_df['RecWeight'] = _apply_weight_cap(
+            res_df['RecWeight'], total_target_weight_pct, self.analysis_model.port_config.max_stock_weight_multiple
+        )
+
         # 6. 매수 가이드 산출 (수량, 손절가, 목표가)
         def get_trade_guide(r):
             if r['Price'] <= 0: return pd.Series([0, 0, 0])

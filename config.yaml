@@ -54,6 +54,8 @@ portfolio:
   max_equity_weight_at_high_risk: 20.0
   danger_thresholds: [50, 70, 85]
   risk_penalties: [1.0, 0.8, 0.5, 0.2] # Corresponds to thresholds
+  min_volatility_floor: 0.005
+  max_stock_weight_multiple: 3.0
 
 # Quant Screener
 screener:

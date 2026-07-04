@@ -40,6 +40,8 @@ class PortfolioConfig(BaseModel):
     max_equity_weight_at_high_risk: float = 20.0
     danger_thresholds: List[float] = [50.0, 70.0, 85.0]
     risk_penalties: List[float] = [1.0, 0.8, 0.5, 0.2]
+    min_volatility_floor: float = 0.005
+    max_stock_weight_multiple: float = 3.0
 
 class FactorWeights(BaseModel):
     quality: float
