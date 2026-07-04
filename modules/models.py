@@ -495,7 +495,10 @@ class QuantScreener:
         use_sector_groups = sector_neutral and 'Sector' in df_clean.columns
         missing_sector = pd.Series(False, index=df_clean.index)
         if use_sector_groups:
-            missing_sector = df_clean['Sector'].isna() | (df_clean['Sector'] == '')
+            # DataLoader는 결측 섹터를 NaN 또는 문자열 'N/A'로 채운다(modules/data_loader.py 참고).
+            # 둘 다 '결측'으로 취급해야 groupby가 조용히 누락시키거나 단독 그룹으로 만점을 주지 않는다.
+            normalized_sector = df_clean['Sector'].astype(str).str.strip().str.upper()
+            missing_sector = df_clean['Sector'].isna() | normalized_sector.isin(['', 'N/A', 'NAN', 'NONE'])
             # 결측/공백 섹터는 별도 그룹으로 묶어, groupby가 해당 행을 조용히 누락시키는 것을 방지한다
             df_clean['Sector'] = df_clean['Sector'].replace('', pd.NA).fillna('Unknown')
 

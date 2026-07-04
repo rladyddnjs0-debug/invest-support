@@ -141,3 +141,19 @@ def test_run_screening_sector_neutral_missing_sector_uses_full_pool_rank_not_aut
     # A2's missing-sector row should match the full-pool computation, not get an automatic 100
     assert a2_sector_neutral_score == pytest.approx(a2_full_pool_score)
     assert a2_sector_neutral_score < 100.0
+
+
+def test_run_screening_sector_neutral_na_string_sector_uses_full_pool_rank():
+    """DataLoader가 실제로 채우는 'N/A' 문자열 결측 섹터도 NaN과 동일하게 처리되어야 한다."""
+    screener = QuantScreener()
+    df = _build_two_sector_df()
+    df.loc[df['Ticker'] == 'A2', 'Sector'] = 'N/A'  # DataLoader의 실제 결측 센티널 문자열
+
+    result = screener.run_screening(df, "Transition (국면 전환)", sector_neutral=True)
+    full_pool_result = screener.run_screening(_build_two_sector_df(), "Transition (국면 전환)", sector_neutral=False)
+
+    a2_sector_neutral_score = result.loc[result['Ticker'] == 'A2', 'score_value'].iloc[0]
+    a2_full_pool_score = full_pool_result.loc[full_pool_result['Ticker'] == 'A2', 'score_value'].iloc[0]
+
+    assert a2_sector_neutral_score == pytest.approx(a2_full_pool_score)
+    assert a2_sector_neutral_score < 100.0
