@@ -75,6 +75,11 @@ def get_cached_historical_per(ticker, force_download=False):
     """역사적 PER 계산 결과를 캐싱하여 API 호출 최소화"""
     return engine.calculate_historical_per_bands(ticker, force_download=force_download)
 
+@st.cache_data(ttl=1800) # 30분 캐시 (당일 등락률은 신선도가 중요하므로 짧게 유지)
+def get_cached_daily_changes(tickers):
+    """당일 등락률을 캐싱하여 히트맵 재렌더링 시 불필요한 API 호출 방지"""
+    return loader.get_daily_changes(tickers)
+
 # --- 상세 분석 팝업 함수 ---
 @st.dialog("📊 종목 상세 분석", width="large")
 def show_stock_details(ticker):
@@ -295,6 +300,12 @@ if st.sidebar.button("🔍 종목 스크리너", width="stretch",
                      type="primary" if st.session_state.menu == "🔍 종목 스크리너" else "secondary"):
     st.session_state.menu = "🔍 종목 스크리너"
     st.session_state.active_ticker = None # 메뉴 이동 시 팝업 닫기
+    st.rerun()
+
+if st.sidebar.button("🗺️ 마켓 히트맵", width="stretch",
+                     type="primary" if st.session_state.menu == "🗺️ 마켓 히트맵" else "secondary"):
+    st.session_state.menu = "🗺️ 마켓 히트맵"
+    st.session_state.active_ticker = None
     st.rerun()
 
 if st.sidebar.button("💎 펀더멘털 가치평가", width="stretch",
@@ -1370,6 +1381,56 @@ elif menu == "🔍 종목 스크리너":
                     st.error("백테스트를 위한 과거 데이터를 충분히 확보하지 못했습니다. (미국 주식은 티커가 너무 많아 시간이 소요될 수 있습니다)")
     else:
         st.error("데이터를 불러오지 못했습니다. 티커 설정을 확인해주세요.")
+
+elif menu == "🗺️ 마켓 히트맵":
+    st.title("🗺️ 마켓 히트맵 (S&P 500)")
+    st.markdown("섹터별 시가총액 비중과 당일 등락률을 한눈에 보여주는 실시간 히트맵입니다.")
+
+    with st.spinner('종목 데이터를 불러오는 중...'):
+        heatmap_tickers = loader.get_sp500_tickers()
+        fund_df = loader.get_stock_fundamentals(heatmap_tickers, market_name="us")
+
+    if fund_df.empty:
+        st.error("종목 데이터를 가져올 수 없습니다.")
+    else:
+        with st.spinner('당일 등락률 계산 중...'):
+            daily_changes = get_cached_daily_changes(tuple(fund_df['Ticker'].tolist()))
+
+        heat_df = fund_df.copy()
+        heat_df['DayChange'] = heat_df['Ticker'].map(daily_changes)
+
+        missing_count = int(heat_df['DayChange'].isna().sum())
+        if len(daily_changes) == 0:
+            st.warning("당일 등락률 데이터를 가져오지 못했습니다. 박스 색상이 모두 중립(0%)으로 표시됩니다.")
+        elif missing_count > 0:
+            st.caption(f"⚠️ {missing_count}개 종목은 당일 등락률을 가져오지 못해 0%로 표시됩니다.")
+
+        heat_df['DayChange'] = heat_df['DayChange'].fillna(0.0)
+        heat_df['Sector'] = heat_df['Sector'].fillna('Unknown Sector').replace('', 'Unknown Sector')
+        heat_df['MarketCap'] = pd.to_numeric(heat_df['MarketCap'], errors='coerce').fillna(0)
+        heat_df = heat_df[heat_df['MarketCap'] > 0]
+        heat_df['DisplayName'] = heat_df['Name'].astype(str) + " (" + heat_df['Ticker'].astype(str) + ")"
+
+        if heat_df.empty:
+            st.error("시가총액 데이터가 유효한 종목이 없어 히트맵을 그릴 수 없습니다.")
+        else:
+            max_abs_change = max(float(heat_df['DayChange'].abs().max()), 1e-6)
+            fig_heatmap = px.treemap(
+                heat_df,
+                path=[px.Constant("S&P 500"), 'Sector', 'DisplayName'],
+                values='MarketCap',
+                color='DayChange',
+                hover_data=[c for c in ['PER', 'ROE'] if c in heat_df.columns],
+                color_continuous_scale='RdYlGn',
+                range_color=[-max_abs_change, max_abs_change],
+                color_continuous_midpoint=0,
+                title="섹터/종목별 당일 등락률 (박스 크기: 시가총액)",
+                template="plotly_dark"
+            )
+            fig_heatmap.update_layout(margin=dict(t=40, l=10, r=10, b=10), height=700)
+            st.plotly_chart(fig_heatmap, width="stretch")
+
+            st.caption(f"펀더멘털(시총/섹터) 캐시는 최대 {settings.data_loader.cache_expiry_days}일, 등락률은 최대 30분 주기로 갱신됩니다.")
 
 elif menu == "💎 펀더멘털 가치평가":
     st.title("💎 펀더멘털 가치평가 (Scenario Analysis)")
