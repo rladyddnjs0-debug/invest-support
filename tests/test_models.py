@@ -125,3 +125,19 @@ def test_run_screening_sector_neutral_handles_missing_sector_value():
 
     a2_score = result.loc[result['Ticker'] == 'A2', 'score_value'].iloc[0]
     assert pd.notna(a2_score)
+
+
+def test_run_screening_sector_neutral_missing_sector_uses_full_pool_rank_not_auto_top_score():
+    screener = QuantScreener()
+    df = _build_two_sector_df()
+    df.loc[df['Ticker'] == 'A2', 'Sector'] = None  # A2 has no sector info; PER=20, mid-pack pool-wide
+
+    result = screener.run_screening(df, "Transition (국면 전환)", sector_neutral=True)
+    full_pool_result = screener.run_screening(_build_two_sector_df(), "Transition (국면 전환)", sector_neutral=False)
+
+    a2_sector_neutral_score = result.loc[result['Ticker'] == 'A2', 'score_value'].iloc[0]
+    a2_full_pool_score = full_pool_result.loc[full_pool_result['Ticker'] == 'A2', 'score_value'].iloc[0]
+
+    # A2's missing-sector row should match the full-pool computation, not get an automatic 100
+    assert a2_sector_neutral_score == pytest.approx(a2_full_pool_score)
+    assert a2_sector_neutral_score < 100.0

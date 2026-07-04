@@ -493,14 +493,22 @@ class QuantScreener:
         # 섹터 중립화 여부에 따라 전체 풀 또는 섹터 그룹 내 백분위 순위를 계산하는 헬퍼.
         # Sector 컬럼이 없으면(예: 실제 업종 데이터가 없는 시장) 전체 풀 기준으로 자동 폴백한다.
         use_sector_groups = sector_neutral and 'Sector' in df_clean.columns
+        missing_sector = pd.Series(False, index=df_clean.index)
         if use_sector_groups:
+            missing_sector = df_clean['Sector'].isna() | (df_clean['Sector'] == '')
             # 결측/공백 섹터는 별도 그룹으로 묶어, groupby가 해당 행을 조용히 누락시키는 것을 방지한다
             df_clean['Sector'] = df_clean['Sector'].replace('', pd.NA).fillna('Unknown')
 
         def pct_rank(col, ascending):
-            if use_sector_groups:
-                return df_clean.groupby('Sector')[col].rank(ascending=ascending, pct=True)
-            return df_clean[col].rank(ascending=ascending, pct=True)
+            if not use_sector_groups:
+                return df_clean[col].rank(ascending=ascending, pct=True)
+            group_rank = df_clean.groupby('Sector')[col].rank(ascending=ascending, pct=True)
+            if missing_sector.any():
+                # 섹터 정보가 원래 없던 종목은 그룹 랭킹 대신 전체 풀 기준으로 계산해,
+                # 'Unknown' 그룹의 유일한(또는 소수) 멤버라는 이유만으로 만점을 받는 것을 방지한다
+                full_rank = df_clean[col].rank(ascending=ascending, pct=True)
+                group_rank = group_rank.where(~missing_sector, full_rank)
+            return group_rank
 
         # 2. 랭킹 산출 (낮을수록 점수가 높아야 하므로 ascending=False 적용)
         # 단, 위에서 처리한 '나쁜 값'들이 가장 큰 값을 가지므로 rank(ascending=False) 시 최하위 점수를 받게 됨
