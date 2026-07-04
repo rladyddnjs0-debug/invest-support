@@ -339,3 +339,57 @@ def test_get_daily_changes_extended_hours_fetch_failure_falls_back_to_last_sessi
 
     assert changes["AAPL"]["change"] == pytest.approx((153.0 / 150.0 - 1) * 100)
     assert changes["AAPL"]["after_hours_change"] is None
+
+
+@patch('yfinance.download')
+@patch('yfinance.Ticker')
+def test_get_stock_fundamentals_us_momentum_excludes_last_month(mock_ticker, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    # index0=100(12개월 전), index1-7=105, index8=120(1개월 전 시점, 위치 -22),
+    # index9-28=80(최근 1개월 구간의 급락), index29=50(현재가)
+    closes = [100.0] + [105.0] * 7 + [120.0] + [80.0] * 20 + [50.0]
+    assert len(closes) == 30
+    mock_df = pd.DataFrame({('AAPL', 'Close'): closes})
+    mock_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+    mock_download.return_value = mock_df
+
+    mock_info = MagicMock()
+    mock_info.info = {
+        'shortName': 'Apple Inc.', 'sector': 'Technology', 'currentPrice': 50.0,
+        'trailingPE': 30.0, 'priceToBook': 40.0, 'returnOnEquity': 0.5,
+        'profitMargins': 0.25, 'revenueGrowth': 0.1, 'marketCap': 2000000000000,
+        '52WeekChange': 0.2
+    }
+    mock_ticker.return_value = mock_info
+
+    res = loader.get_stock_fundamentals(tickers=["AAPL"], market_name="us")
+
+    # 12-1 모멘텀 = (120/100 - 1) * 100 = 20.0 (최근 1개월의 급락은 반영되지 않아야 함)
+    assert res.loc[res['Ticker'] == 'AAPL', 'Momentum'].iloc[0] == pytest.approx(20.0)
+
+
+@patch('yfinance.download')
+@patch('yfinance.Ticker')
+def test_get_stock_fundamentals_us_momentum_falls_back_when_series_too_short(mock_ticker, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    # 22거래일 미만이라 12-1 윈도우를 계산할 수 없는 경우
+    closes = [100.0, 105.0, 110.0, 115.0, 120.0]
+    mock_df = pd.DataFrame({('AAPL', 'Close'): closes})
+    mock_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+    mock_download.return_value = mock_df
+
+    mock_info = MagicMock()
+    mock_info.info = {
+        'shortName': 'Apple Inc.', 'sector': 'Technology', 'currentPrice': 120.0,
+        'trailingPE': 30.0, 'priceToBook': 40.0, 'returnOnEquity': 0.5,
+        'profitMargins': 0.25, 'revenueGrowth': 0.1, 'marketCap': 2000000000000,
+        '52WeekChange': 0.3
+    }
+    mock_ticker.return_value = mock_info
+
+    res = loader.get_stock_fundamentals(tickers=["AAPL"], market_name="us")
+
+    # 시계열이 너무 짧으면 기존과 동일하게 52WeekChange 폴백을 사용해야 함
+    assert res.loc[res['Ticker'] == 'AAPL', 'Momentum'].iloc[0] == pytest.approx(30.0)
