@@ -355,6 +355,13 @@ class DataLoader:
             close = data['Close'].dropna()
         return close if len(close) > 0 else None
 
+    @staticmethod
+    def _is_timestamp_today(ts, today_et):
+        """연장거래 체결 시각(tz-aware)이 미국 동부시간 기준 오늘 날짜인지 확인 (장기 연휴 등 오래된 데이터 배제)."""
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("America/New_York")
+        return ts.date() == today_et
+
     def get_daily_changes(self, tickers):
         """
         전 종목 당일 등락률(%)을 계산.
@@ -368,6 +375,10 @@ class DataLoader:
         'after_hours_change'는 애프터마켓(정규장 종료 후) 시간에만 별도로, 연장거래 체결가를
         '금일 정규장 종가'와 비교한 애프터마켓 자체 변동률이다. 그 외 시간(정규장 중, 프리마켓)에는
         비교 대상이 되는 '금일 정규장 종가'가 아직 없으므로 None이다.
+
+        연장거래 데이터를 조회했더라도 그 마지막 체결 시각이 '오늘'이 아니면(주말/연휴 등으로 실제
+        거래가 없었던 경우) 사용하지 않고 마지막 정규장 종가를 그대로 현재가로 취급한다. 오래된
+        연장거래 스냅샷이 매 조회마다 미세하게 다른 노이즈성 등락률을 만드는 것을 방지한다.
 
         시총/섹터 등 정적 정보는 포함하지 않으며, 데이터가 없는 티커는 결과에서 제외된다.
         """
@@ -412,9 +423,11 @@ class DataLoader:
                     else:
                         reference = daily_close.iloc[-1]
 
+                    # 연장거래 데이터가 있어도, 그 마지막 체결 시각이 '오늘'이 아니면(장기 연휴 등으로
+                    # 실제 거래가 없었던 경우) 사용하지 않고 마지막 정규장 종가를 그대로 현재가로 둔다.
                     current = reference
                     ext_close = self._extract_close_series(extended, ticker)
-                    if ext_close is not None:
+                    if ext_close is not None and self._is_timestamp_today(ext_close.index[-1], today_et):
                         current = ext_close.iloc[-1]
                         if today_close and today_close > 0:
                             after_hours_change = float((current / today_close - 1) * 100)

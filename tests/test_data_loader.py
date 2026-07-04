@@ -216,10 +216,11 @@ def test_get_daily_changes_after_hours_uses_previous_close(mock_is_regular, mock
     }, index=pd.to_datetime([yesterday, today]))
     daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
-    # 애프터마켓 연장거래 체결가: 가장 최근 체결가 160
+    # 애프터마켓 연장거래 체결가(오늘 시각): 가장 최근 체결가 160
+    now_et = datetime.now(ZoneInfo("America/New_York"))
     extended_df = pd.DataFrame({
         ('AAPL', 'Close'): [158.0, 159.0, 160.0],
-    }, index=pd.date_range(start="2023-01-03", periods=3, freq="min"))
+    }, index=pd.date_range(end=now_et, periods=3, freq="min"))
     extended_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
     mock_download.side_effect = [daily_df, extended_df]
@@ -246,10 +247,11 @@ def test_get_daily_changes_pre_market_uses_previous_close(mock_is_regular, mock_
     }, index=pd.to_datetime([day_before, yesterday]))
     daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
-    # 프리마켓 연장거래 체결가: 가장 최근 체결가 152
+    # 프리마켓 연장거래 체결가(오늘 시각): 가장 최근 체결가 152
+    now_et = datetime.now(ZoneInfo("America/New_York"))
     extended_df = pd.DataFrame({
         ('AAPL', 'Close'): [151.0, 151.5, 152.0],
-    }, index=pd.date_range(start="2023-01-03", periods=3, freq="min"))
+    }, index=pd.date_range(end=now_et, periods=3, freq="min"))
     extended_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
 
     mock_download.side_effect = [daily_df, extended_df]
@@ -259,6 +261,35 @@ def test_get_daily_changes_pre_market_uses_previous_close(mock_is_regular, mock_
     # 마지막 봉(150)이 '전일' 종가이므로 그대로 기준가로 사용하고, 현재가는 연장거래 최신가(152)
     assert changes["AAPL"]["change"] == pytest.approx((152.0 / 150.0 - 1) * 100)
     # 프리마켓에는 비교 대상인 '금일 정규장 종가'가 아직 없으므로 애프터마켓 등락률은 None
+    assert changes["AAPL"]["after_hours_change"] is None
+
+
+@patch('yfinance.download')
+@patch.object(DataLoader, '_is_regular_market_hours', return_value=False)
+def test_get_daily_changes_stale_extended_data_falls_back_to_reference(mock_is_regular, mock_download, clean_data_loader):
+    loader = clean_data_loader
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    yesterday = today - timedelta(days=1)
+
+    daily_df = pd.DataFrame({
+        ('AAPL', 'Close'): [150.0, 153.0],
+    }, index=pd.to_datetime([yesterday, today]))
+    daily_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    # 연장거래 데이터는 조회에 성공했지만, 마지막 체결 시각이 3일 전(장기 연휴 등)이라 오늘 것이 아님
+    stale_end = datetime.now(ZoneInfo("America/New_York")) - timedelta(days=3)
+    extended_df = pd.DataFrame({
+        ('AAPL', 'Close'): [200.0, 201.0, 202.0],
+    }, index=pd.date_range(end=stale_end, periods=3, freq="min"))
+    extended_df.columns = pd.MultiIndex.from_tuples([('AAPL', 'Close')])
+
+    mock_download.side_effect = [daily_df, extended_df]
+
+    changes = loader.get_daily_changes(["AAPL"])
+
+    # 오래된 연장거래 데이터는 무시하고, 마지막 정규장 종가(153)를 그대로 현재가로 취급 -> 변동 없음
+    assert changes["AAPL"]["change"] == pytest.approx(0.0)
     assert changes["AAPL"]["after_hours_change"] is None
 
 
