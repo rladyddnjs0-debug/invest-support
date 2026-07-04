@@ -1087,7 +1087,9 @@ elif menu == "🔍 종목 스크리너":
         cache_key = f"screened_{market_type}_{regime_choice}"
         if cache_key not in st.session_state:
             with st.spinner('팩터 스코어링 및 랭킹 산출 중...'):
-                st.session_state[cache_key] = screener.run_screening(fund_df, regime_choice)
+                st.session_state[cache_key] = screener.run_screening(
+                    fund_df, regime_choice, sector_neutral=(market_name_key == "us")
+                )
         
         screened_df = st.session_state[cache_key]
             

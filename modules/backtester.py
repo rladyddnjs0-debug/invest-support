@@ -37,7 +37,9 @@ class QuantBacktester:
             return None, None
             
         # 4. 스크리닝 (오늘 시점 펀더멘털 기준 랭킹)
-        screened_df = self.screener.run_screening(hist_fund_df, regime_choice)
+        screened_df = self.screener.run_screening(
+            hist_fund_df, regime_choice, sector_neutral=(market_name == "us")
+        )
         top_10 = screened_df.head(10)
         top_10_tickers = top_10['Ticker'].tolist()
         
