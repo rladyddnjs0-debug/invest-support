@@ -30,13 +30,14 @@
 - `EV_EBITDA`: PER/PBR과 동일하게 취급한다. EBITDA 적자(음수) 또는 데이터 없음(0/NaN)인 경우, 기존 "적자 기업 페널티" 블록(`for col in ['PER', 'PBR']: ...`)의 대상 컬럼에 `EV_EBITDA`를 추가해 해당 종목이 그 지표에서 최하위(`max_val + 100`)로 떨어지게 한다.
 - `DividendYield`: 페널티 로직 대상이 **아니다**. 무배당 기업의 0은 "데이터 없음"이 아니라 정당한 값이며, `ascending=True` 백분위 랭킹에서 자연스럽게 최하위 근처로 랭크되면 충분하다.
 
-## 라이브 검증이 필요한 리스크
+## 라이브 검증 결과 (단위 확정)
 
-과거 Item D(레짐 자동계산 `period=6mo→2y`)에서, "이 정도면 충분할 것"이라는 가정이 실제 다운스트림 가드 조건과 어긋나 유닛 테스트를 모두 통과하고도 기능이 무력화된 적이 있다([[feedback-dev-workflow]]). 이번 작업에도 유사한 리스크가 있어 구현 단계에서 반드시 실제 값으로 확인한다:
+과거 Item D(레짐 자동계산 `period=6mo→2y`)에서, "이 정도면 충분할 것"이라는 가정이 실제 다운스트림 가드 조건과 어긋나 유닛 테스트를 모두 통과하고도 기능이 무력화된 적이 있다([[feedback-dev-workflow]]). 이번 작업도 브레인스토밍 단계에서 미리 라이브로 확인했다:
 
-1. **`yfinance`의 `dividendYield` 단위**: 버전에 따라 소수(`0.015` = 1.5%)로 반환되던 것이 최근 버전에서는 이미 퍼센트 숫자(`1.5`)로 바뀌었다는 보고가 있다. 기존 코드는 `returnOnEquity`/`profitMargins`/`revenueGrowth`를 모두 "소수 → `*100`" 관례로 다루고 있으므로, 실제 설치된 `yfinance` 버전에서 몇 개 종목에 대해 라이브로 값을 찍어보고 `*100` 필요 여부를 확정한다.
-2. **pykrx `DIV` 컬럼 단위**: PER/PBR/EPS/BPS와 마찬가지로 이미 절대 숫자(퍼센트 그대로, 예: `1.53`)일 것으로 예상되지만 라이브 호출로 확인한다.
-3. 두 시장의 `DividendYield` 최종 단위(퍼센트 스케일)가 서로 일치해야 `pct_rank` 자체는 순위만 쓰므로 시장 간 비교엔 영향 없지만, 화면 표시(`{:.2f}%` 포맷)가 왜곡되지 않도록 확인한다.
+1. **`yfinance`(설치 버전 1.3.0)의 `dividendYield`**: `KO` → `2.52`, `AAPL` → `0.35` — **이미 퍼센트 숫자**다. 기존 코드가 `returnOnEquity`/`profitMargins`/`revenueGrowth`에 적용하는 "소수 → `*100`" 관례를 **여기엔 적용하지 않는다**. `info.get('dividendYield', 0)` 값을 그대로 쓴다.
+2. **pykrx(설치 버전 1.2.8) `DIV` 컬럼**: 라이브러리 자체 docstring 예시(`get_market_fundamental_by_ticker`)에 `1.79`, `1.24` 같은 값이 나온다 — PER/PBR/EPS/BPS와 마찬가지로 **이미 퍼센트 숫자**다. 변환 없이 그대로 사용한다.
+3. **`enterpriseToEbitda`**: `KO` → `23.605`, `AAPL` → `28.623` — PER과 같은 배수(multiple) 형태이므로 변환 없이 그대로 사용한다.
+4. 두 시장 모두 `DividendYield`가 동일하게 "퍼센트 숫자, 무변환" 관례이므로 화면 표시(`{:.2f}%` 포맷)도 시장 구분 없이 동일하게 적용하면 된다.
 
 ## 호출부 변경
 
@@ -90,4 +91,4 @@ df_clean['score_value'] = sum(pct_rank(c, False) for c in value_low_better) * we
 - `yfinance.Ticker.info`를 모킹하여 `enterpriseToEbitda`, `dividendYield` 필드가 결과 딕셔너리의 `EV_EBITDA`/`DividendYield`로 정확히 매핑되는지 검증.
 - `pykrx` 응답을 모킹하여 `DIV` 컬럼이 `DividendYield`로 매핑되는지, `EV_EBITDA` 키가 KR 결과에는 아예 존재하지 않는지 검증.
 
-**구현 단계에서 반드시 수행**: 위 "라이브 검증이 필요한 리스크" 절의 실제 API 호출 확인 — 유닛 테스트만으로는 단위 변환 버그를 잡을 수 없었던 과거 사례([[project-invest-support-status]])를 반복하지 않기 위함.
+단위 변환 버그(과거 Item D 사례, [[project-invest-support-status]])를 막기 위해 필요한 라이브 확인은 브레인스토밍 단계에서 이미 완료했다("라이브 검증 결과" 절 참고) — 구현 단계에서 추가로 라이브 호출을 할 필요는 없다.
