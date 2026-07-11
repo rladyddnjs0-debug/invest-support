@@ -897,7 +897,7 @@ export function ScoreGauges({ score, targetWeightPct }: ScoreGaugesProps) {
         ]}
         layout={{
           height: 200,
-          margin: { l: 20, r: 20, t: 20, b: 20 },
+          margin: { l: 20, r: 20, t: 60, b: 20 },
           title: { text: "시장 매력도 점수" },
         }}
         style={{ width: "100%" }}
@@ -922,7 +922,7 @@ export function ScoreGauges({ score, targetWeightPct }: ScoreGaugesProps) {
         ]}
         layout={{
           height: 180,
-          margin: { l: 20, r: 20, t: 20, b: 20 },
+          margin: { l: 20, r: 20, t: 60, b: 20 },
           title: { text: "권장 주식 투자 비중" },
         }}
         style={{ width: "100%" }}
@@ -1067,6 +1067,7 @@ export function YieldCharts({ yieldSpread, yields }: YieldChartsProps) {
           height: 400,
           margin: { l: 10, r: 10, t: 40, b: 10 },
           legend: { orientation: "h", yanchor: "bottom", y: 1.02, xanchor: "right", x: 1 },
+          yaxis: { automargin: true },
         }}
         style={{ width: "100%" }}
         useResizeHandler
@@ -1087,6 +1088,7 @@ export function YieldCharts({ yieldSpread, yields }: YieldChartsProps) {
           title: { text: "장단기 금리차 (10Y-2Y) 추이" },
           height: 300,
           margin: { l: 10, r: 10, t: 40, b: 10 },
+          yaxis: { automargin: true },
           shapes: [
             {
               type: "line",
@@ -1160,7 +1162,7 @@ function MiniChart({ label, metric, color, prefix }: { label: string; metric: Ma
           height: 180,
           margin: { l: 10, r: 10, t: 10, b: 10 },
           xaxis: { title: { text: "" } },
-          yaxis: { title: { text: "" } },
+          yaxis: { title: { text: "" }, automargin: true },
         }}
         style={{ width: "100%" }}
         useResizeHandler
@@ -1327,6 +1329,7 @@ export function AttractivenessPage() {
               title: { text: `${data.marketName} 가격 추이` },
               height: 400,
               margin: { l: 20, r: 20, t: 30, b: 20 },
+              yaxis: { automargin: true },
             }}
             style={{ width: "100%" }}
             useResizeHandler
@@ -1459,3 +1462,4 @@ No commit for this task. If all steps pass, this feature is complete.
 - **No placeholders:** every step has literal file contents or literal commands with expected output.
 - **Correction (post-Task-1 review):** the original version of Task 1's helper called `engine.calculate_attractiveness(...)` and immediately accessed `attr_res["score"]`/`["regime"]`/`["raw_scores"][...]`/`["weights"]` with no `None` check — but `AnalysisModel.calculate_attractiveness` (`modules/models.py`) returns `None` whenever the fetched price history has fewer than `min_data_points` (200) rows, which would crash with `TypeError: 'NoneType' object is not subscriptable`. The SAME function already correctly guarded the analogous `run_lppl_fit` call one line later (`danger_score = lppl_res["danger_score"] if lppl_res else 0.0`), making the omission a clear oversight rather than a deliberate choice — and the mocked test suite never caught it because the mock's `calculate_attractiveness.return_value` was always a valid dict. Fixed by adding `if attr_res is None: return None` immediately after the call, matching the existing main-index-missing contract (Task 2's router converts either `None` case to a 503). A regression test (`test_get_market_attractiveness_returns_none_when_insufficient_price_history`) was added to `test_attractiveness.py`. This plan's Task 1 code block above is updated to match.
 - **Correction (post-Task-7 live browser test):** two issues found. (1) `DataLoader.get_market_history` (`modules/data_loader.py`, untouched — copied verbatim) caches each ticker's price history to a disk file keyed only by ticker name + interval, not by period, with a purely date-based freshness check (same calendar day → reuse cached file regardless of requested period). So the `period` query param has NO effect on returned data within the same calendar day — whichever period is fetched first for a ticker "wins" until the cache naturally expires the next day. Verified via curl: 1y/2y/3y/5y responses were byte-identical except the echoed `period` field. This is a pre-existing characteristic of the shared engine (same category as the earlier-documented pykrx/KRX limitation), not a regression introduced by this feature, and not fixable without either editing `modules/` (forbidden) or building a nontrivial period-aware cache-versioning layer that risks reintroducing unnecessary duplicate downloads when only the MARKET (not the period) changes. **User decision: accept as a known, documented limitation** (see `backend/NOTES.md`) rather than build a fix — the period selector remains in the UI but currently has no visible effect within a given day. (2) The price chart's hardcoded `line: { color: "white" }` was invisible against the app's white background (no dark theme). Fixed to `"#3273dc"`, matching `YieldCharts.tsx`'s US10Y color. This plan's Task 7 code block above is updated to match.
+- **Correction (post-Task-8 final E2E verification):** two cosmetic rendering bugs found. (1) Both `ScoreGauges` gauges had `margin.t: 20`, too tight for the `title` text to clear Plotly's auto-rendered midpoint axis tick label (e.g. "50"), causing visual overlap — fixed by increasing to `margin.t: 60` on both gauges. (2) Several charts with numeric y-axes (the `AttractivenessPage` price chart, both charts in `YieldCharts`, and `MacroMiniCharts`' shared mini-chart layout) had tight hardcoded left margins with no `yaxis.automargin`, clipping leading digits off tick labels for larger values (e.g. a price like `7,500` rendered as `500`) — fixed by adding `yaxis: { automargin: true }` to each, which is more robust across the very different price magnitudes this feature displays (S&P500 ~5000-7000 vs. KOSPI ~2000-3000) than guessing a larger fixed pixel margin. This plan's Task 5/6/7 code blocks above are all updated to match.
