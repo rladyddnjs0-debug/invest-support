@@ -717,7 +717,7 @@ git commit -m "feat: add cached fundamentals fetch + scoring helper"
 
 **Interfaces:**
 - Consumes: `get_ref_analysis` (Task 3), `get_cache`/`get_loader`/`get_engine` (Task 2)
-- Produces: `REGIME_LABELS: dict[str, str]`, `REGIME_SLUGS: dict[str, str]`, `RegimeSlug` type alias (used by Tasks 6, 7), `RegimeResponse`/`MacroWeights` Pydantic models, FastAPI `router` object mounted at `/api/screener` (Tasks 6, 7 add routes to the same `router`)
+- Produces: `REGIME_LABELS: dict[str, str]`, `REGIME_SLUGS: dict[str, str]`, `RegimeSlug` type alias (used by Tasks 6, 7), `RegimeResponse`/`MacroWeights` Pydantic models, FastAPI `router` object mounted at `/api/screener` (Tasks 6, 7 add routes to the same `router`), `_get_screener_dependency` module-level alias (Task 7 must use this, not `get_screener`, to avoid a name-shadowing bug — see Task 7's Step 4)
 
 **Note on `weights` naming:** this codebase has two unrelated "weights" concepts that must not share a schema: `AnalysisModel.calculate_attractiveness()`'s regime-blend weights (fields `trend/macro/sentiment/liquidity/breadth/credit`, from `modules/config.py`'s `RegimeWeights`) — what THIS task's `RegimeResponse.weights` exposes — versus `QuantScreener.weights[regime_label]`'s per-stock factor weights (fields `value/quality/growth/momentum`, from `modules/config.py`'s `FactorWeights`) — what Task 6's `ScreenerResponse.weights` exposes. This task defines `MacroWeights` for the former; Task 6 defines its own `FactorWeights` for the latter. Do not reuse one schema for both.
 
@@ -900,6 +900,14 @@ from app.schemas import MacroWeights, RegimeResponse
 Market = Literal["us", "kr"]
 
 router = APIRouter(prefix="/api/screener", tags=["screener"])
+
+# Captured before the `get_screener` route below is defined: that route handler is
+# itself named `get_screener` (Task 6), which rebinds the module-level name and would
+# shadow this import for any code appearing later in the file. `Depends(get_screener)`
+# in post_position_sizing (Task 7) would otherwise resolve to the route handler, not
+# the app.dependencies provider, and FastAPI would incorrectly treat that handler's
+# own params (including `regime`) as sub-dependencies of the later route.
+_get_screener_dependency = get_screener
 
 
 @router.get("/{market}/regime", response_model=RegimeResponse)
@@ -1188,6 +1196,8 @@ Expected: 2 new failures — `404 Not Found`.
 
 - [ ] **Step 4: Add the position-sizing endpoint**
 
+Use `Depends(_get_screener_dependency)`, NOT `Depends(get_screener)`, in this route. By the time this function is defined, the module-level name `get_screener` has been rebound to Task 6's route handler (`async def get_screener(...)` at `/{market}`) — Python evaluates a `def`'s default-argument expressions when the `def` statement executes, and Task 6's `def` statement, once it finishes executing, rebinds `get_screener` in the module namespace before this function's own `def` statement runs. Using the plain name here would silently inject Task 6's route handler as a "dependency" instead of the real `app.dependencies.get_screener` provider. `_get_screener_dependency` (captured in Task 5, right after `router = APIRouter(...)`, before any route shadows the name) is the safe reference.
+
 ```python
 # backend/app/routers/screener.py — add imports and route
 from app.schemas import (  # extend existing schemas import
@@ -1206,7 +1216,7 @@ async def post_position_sizing(
     cache=Depends(get_cache),
     loader=Depends(get_loader),
     engine=Depends(get_engine),
-    screener=Depends(get_screener),
+    screener=Depends(_get_screener_dependency),
 ) -> PositionSizingResponse:
     regime_label = REGIME_LABELS.get(body.regime, REGIME_LABELS["transition"])
 
@@ -2190,4 +2200,5 @@ No commit for this task. If all 5 steps pass, the MVP from `docs/superpowers/spe
 - **Spec coverage:** market/regime selection (Tasks 5, 11), ranking table (Task 6, 11), 4 charts (Task 12), position sizing (Tasks 7, 13), caching strategy incl. single-flight locks (Tasks 2, 3, 4), error handling for failed regime calc / empty data / stale cache (Tasks 5, 6, 11), separate repo with copied `modules/` (Task 1), TypeScript + Tailwind + shadcn/ui + Plotly.js stack (Tasks 9, 10, 12) — all covered. Deployment is explicitly out of scope per spec and is not a task here.
 - **Type consistency:** `RegimeSlug` defined once in `app/regimes.py` (backend) and `api/types.ts` (frontend) and reused everywhere else; `StockRow`/`FactorWeights`/`Position` field names are camelCase on both sides with no alias translation needed, checked against each producing task.
 - **Correction (post-Task-5 implementation):** the original version of this plan defined a single `FactorWeights` schema (`value/quality/growth/momentum`) and reused it for both Task 5's `RegimeResponse.weights` and Task 6's `ScreenerResponse.weights` — but these are two different concepts in `modules/`: `AnalysisModel.calculate_attractiveness()`'s regime-blend weights (`trend/macro/sentiment/liquidity/breadth/credit`) versus `QuantScreener.weights[regime_label]`'s per-stock factor weights (`value/quality/growth/momentum`). Task 5's implementer caught this via a real `pydantic.ValidationError` when the brief's own test fixture (`fake_engine.calculate_attractiveness.return_value["weights"]`, keyed `trend/macro/...`) didn't fit the brief's originally-specified `FactorWeights` shape. Fixed by splitting into `MacroWeights` (Task 5, for `RegimeResponse`) and `FactorWeights` (Task 6, for `ScreenerResponse`) — both this plan file and the already-committed Task 5 code were corrected to match.
+- **Correction (post-Task-7 implementation):** the original version of this plan named Task 6's route handler `get_screener` — the same name as the `app.dependencies.get_screener` DI provider imported at the top of the same file. Since Python evaluates a function's default-argument expressions (including `Depends(...)`) at `def`-statement execution time, and Task 6's `def get_screener(...)` statement rebinds the module-level name `get_screener` once it finishes executing, Task 7's later `def post_position_sizing(..., screener=Depends(get_screener))` would have silently resolved `get_screener` to Task 6's route handler instead of the DI provider — FastAPI would then have recursively merged that handler's own parameters (including a bare `regime: RegimeSlug`) into position-sizing's dependency graph, producing a spurious 422 on valid POST bodies. Task 7's implementer caught this via direct reproduction (not just suspicion) and fixed it by adding `_get_screener_dependency = get_screener` immediately after `router = APIRouter(...)` in Task 5's code (before any route can shadow the name), and pointing only the position-sizing route at that captured reference. Both this plan file and the already-committed code were corrected to match; Task 6's own route is unaffected (its own `Depends(get_screener)` is evaluated before its own `def` statement completes the rebind, so it still resolves correctly).
 - **No placeholders:** every step has literal file contents or literal commands with expected output; no "add error handling here" style steps remain.
