@@ -352,7 +352,7 @@ source .venv/bin/activate
 pytest tests/test_heatmap.py -v
 ```
 
-Expected: `5 passed`.
+Expected: `4 passed`.
 
 - [ ] **Step 5: Commit**
 
