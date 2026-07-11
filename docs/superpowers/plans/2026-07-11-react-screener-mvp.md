@@ -1698,25 +1698,31 @@ export function ScreenerPage() {
   const effectiveRegime: RegimeSlug | null = manualRegime ?? autoRegime
 
   useEffect(() => {
+    let ignore = false
     setAutoRegime(null)
     setManualRegime(null)
     setScreenerData(null)
     setError(null)
 
     getRegime(market)
-      .then((res) => setAutoRegime(res.autoRegime))
-      .catch(() => setAutoRegime(null))
+      .then((res) => { if (!ignore) setAutoRegime(res.autoRegime) })
+      .catch(() => { if (!ignore) setAutoRegime(null) })
+
+    return () => { ignore = true }
   }, [market])
 
   useEffect(() => {
     if (!effectiveRegime) return
 
+    let ignore = false
     setLoading(true)
     setError(null)
     getScreener(market, effectiveRegime)
-      .then((res) => setScreenerData(res))
-      .catch((err) => setError(err instanceof Error ? err.message : "알 수 없는 오류"))
-      .finally(() => setLoading(false))
+      .then((res) => { if (!ignore) setScreenerData(res) })
+      .catch((err) => { if (!ignore) setError(err instanceof Error ? err.message : "알 수 없는 오류") })
+      .finally(() => { if (!ignore) setLoading(false) })
+
+    return () => { ignore = true }
   }, [market, effectiveRegime])
 
   return (
@@ -1733,7 +1739,7 @@ export function ScreenerPage() {
         </Select>
 
         <Select
-          value={effectiveRegime ?? undefined}
+          value={effectiveRegime ?? null}
           onValueChange={(v) => setManualRegime(v as RegimeSlug)}
         >
           <SelectTrigger className="w-56">
@@ -1751,7 +1757,7 @@ export function ScreenerPage() {
         {autoRegime && !manualRegime && (
           <Badge variant="secondary">자동 계산된 레짐 적용 중</Badge>
         )}
-        {!autoRegime && (
+        {!effectiveRegime && (
           <Badge variant="destructive">레짐 자동 계산 실패 — 수동 선택 필요</Badge>
         )}
       </div>
@@ -2212,6 +2218,7 @@ No commit for this task. If all 5 steps pass, the MVP from `docs/superpowers/spe
 - **Spec coverage:** market/regime selection (Tasks 5, 11), ranking table (Task 6, 11), 4 charts (Task 12), position sizing (Tasks 7, 13), caching strategy incl. single-flight locks (Tasks 2, 3, 4), error handling for failed regime calc / empty data / stale cache (Tasks 5, 6, 11), separate repo with copied `modules/` (Task 1), TypeScript + Tailwind + shadcn/ui + Plotly.js stack (Tasks 9, 10, 12) — all covered. Deployment is explicitly out of scope per spec and is not a task here.
 - **Type consistency:** `RegimeSlug` defined once in `app/regimes.py` (backend) and `api/types.ts` (frontend) and reused everywhere else; `StockRow`/`FactorWeights`/`Position` field names are camelCase on both sides with no alias translation needed, checked against each producing task.
 - **Correction (post-Task-5 implementation):** the original version of this plan defined a single `FactorWeights` schema (`value/quality/growth/momentum`) and reused it for both Task 5's `RegimeResponse.weights` and Task 6's `ScreenerResponse.weights` — but these are two different concepts in `modules/`: `AnalysisModel.calculate_attractiveness()`'s regime-blend weights (`trend/macro/sentiment/liquidity/breadth/credit`) versus `QuantScreener.weights[regime_label]`'s per-stock factor weights (`value/quality/growth/momentum`). Task 5's implementer caught this via a real `pydantic.ValidationError` when the brief's own test fixture (`fake_engine.calculate_attractiveness.return_value["weights"]`, keyed `trend/macro/...`) didn't fit the brief's originally-specified `FactorWeights` shape. Fixed by splitting into `MacroWeights` (Task 5, for `RegimeResponse`) and `FactorWeights` (Task 6, for `ScreenerResponse`) — both this plan file and the already-committed Task 5 code were corrected to match.
+- **Correction (post-Task-11 review, UX bugs plan-mandated in the original ScreenerPage code):** the task reviewer found two real bugs present verbatim in this plan's original `ScreenerPage.tsx` code (not introduced by the implementer): (1) switching markets after a regime had already resolved could fire one spurious `getScreener(newMarket, staleOldRegime)` request before the reset effect's state changes took hold, because `effectiveRegime` (a derived value) wasn't reset atomically with its constituent state in the same render, and neither effect had a cancellation guard — the stale response could then render a populated table for the wrong market/regime pair alongside a contradictory "auto-calc failed" badge; (2) the destructive "자동 계산 실패" badge checked `!autoRegime` instead of `!effectiveRegime`, so it kept showing even after the user successfully picked a working regime manually. Per review process, plan-mandated findings are the human's call, not silently fixed or dismissed — presented to the user, who chose to fix immediately. Fixed by adding an `ignore`-flag cleanup to both `useEffect`s (discards stale async results after their deps change) and changing the badge condition to `!effectiveRegime`. Also corrected the adjacent `Select value={effectiveRegime ?? undefined}` to `?? null` to match the real fix Task 11's implementer already applied for Base UI's controlled-component requirement (see the Task 9 tooling note). This plan's Task 11 code block above reflects the corrected version.
 - **Correction (post-Task-11 live browser test, real data):** Task 11's manual browser verification against real cached S&P 500 data found `GET /api/screener/us` 500ing for one specific ticker (`FISV`, Fiserv): `modules/data_loader.py`'s `info.get('sector', 'N/A')` only substitutes a fallback when the `'sector'` key is entirely absent from yfinance's `.info` dict — but yfinance can return `{'sector': None, ...}` (key present, value `None`) instead, and that `None` round-trips through the on-disk fundamentals CSV as an empty cell, which `pd.read_csv` reads back as `NaN`. `StockRow.sector`/`StockRow.name` are `str`-typed, and Task 6's `r.get("Sector", "Unknown")` only guards against a missing key, not a present-but-NaN value — so a real NaN reaching `StockRow(...)` raised a Pydantic `ResponseValidationError` (HTTP 500), blocking the default (US) market end-to-end. Fixed entirely within `backend/app/routers/screener.py` (code this plan owns) by normalizing `screened_df["Sector"]`/`["Name"]` with `.fillna(...)` on a local copy before building `StockRow`s — `modules/` stays untouched, consistent with the verbatim-copy constraint. A regression test (NaN Sector/Name row) was added to `test_screener_router.py`. This plan's Task 6 code block above is updated to match.
 - **Correction (post-Task-7 implementation):** the original version of this plan named Task 6's route handler `get_screener` — the same name as the `app.dependencies.get_screener` DI provider imported at the top of the same file. Since Python evaluates a function's default-argument expressions (including `Depends(...)`) at `def`-statement execution time, and Task 6's `def get_screener(...)` statement rebinds the module-level name `get_screener` once it finishes executing, Task 7's later `def post_position_sizing(..., screener=Depends(get_screener))` would have silently resolved `get_screener` to Task 6's route handler instead of the DI provider — FastAPI would then have recursively merged that handler's own parameters (including a bare `regime: RegimeSlug`) into position-sizing's dependency graph, producing a spurious 422 on valid POST bodies. Task 7's implementer caught this via direct reproduction (not just suspicion) and fixed it by adding `_get_screener_dependency = get_screener` immediately after `router = APIRouter(...)` in Task 5's code (before any route can shadow the name), and pointing only the position-sizing route at that captured reference. Both this plan file and the already-committed code were corrected to match; Task 6's own route is unaffected (its own `Depends(get_screener)` is evaluated before its own `def` statement completes the rebind, so it still resolves correctly).
 - **No placeholders:** every step has literal file contents or literal commands with expected output; no "add error handling here" style steps remain.
