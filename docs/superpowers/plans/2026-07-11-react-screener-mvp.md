@@ -717,7 +717,9 @@ git commit -m "feat: add cached fundamentals fetch + scoring helper"
 
 **Interfaces:**
 - Consumes: `get_ref_analysis` (Task 3), `get_cache`/`get_loader`/`get_engine` (Task 2)
-- Produces: `REGIME_LABELS: dict[str, str]`, `REGIME_SLUGS: dict[str, str]`, `RegimeSlug` type alias (used by Tasks 6, 7), `RegimeResponse`/`FactorWeights` Pydantic models (used by Tasks 6, 7), FastAPI `router` object mounted at `/api/screener` (Tasks 6, 7 add routes to the same `router`)
+- Produces: `REGIME_LABELS: dict[str, str]`, `REGIME_SLUGS: dict[str, str]`, `RegimeSlug` type alias (used by Tasks 6, 7), `RegimeResponse`/`MacroWeights` Pydantic models, FastAPI `router` object mounted at `/api/screener` (Tasks 6, 7 add routes to the same `router`)
+
+**Note on `weights` naming:** this codebase has two unrelated "weights" concepts that must not share a schema: `AnalysisModel.calculate_attractiveness()`'s regime-blend weights (fields `trend/macro/sentiment/liquidity/breadth/credit`, from `modules/config.py`'s `RegimeWeights`) — what THIS task's `RegimeResponse.weights` exposes — versus `QuantScreener.weights[regime_label]`'s per-stock factor weights (fields `value/quality/growth/momentum`, from `modules/config.py`'s `FactorWeights`) — what Task 6's `ScreenerResponse.weights` exposes. This task defines `MacroWeights` for the former; Task 6 defines its own `FactorWeights` for the latter. Do not reuse one schema for both.
 
 - [ ] **Step 1: Define the regime slug mapping**
 
@@ -745,17 +747,19 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-class FactorWeights(BaseModel):
-    value: float
-    quality: float
-    growth: float
-    momentum: float
+class MacroWeights(BaseModel):
+    trend: float
+    macro: float
+    sentiment: float
+    liquidity: float
+    breadth: float
+    credit: float
 
 
 class RegimeResponse(BaseModel):
     autoRegime: Optional[str] = None
     regimeLabel: Optional[str] = None
-    weights: Optional[FactorWeights] = None
+    weights: Optional[MacroWeights] = None
 ```
 
 - [ ] **Step 3: Write the failing router test**
@@ -891,7 +895,7 @@ from fastapi import APIRouter, Depends
 from app.dependencies import get_cache, get_engine, get_loader, get_screener
 from app.ref_analysis import get_ref_analysis
 from app.regimes import REGIME_LABELS, REGIME_SLUGS
-from app.schemas import FactorWeights, RegimeResponse
+from app.schemas import MacroWeights, RegimeResponse
 
 Market = Literal["us", "kr"]
 
@@ -908,7 +912,7 @@ async def get_regime(
     analysis = await get_ref_analysis(market, cache, loader, engine)
     label = analysis["autoRegimeLabel"]
     slug = REGIME_SLUGS.get(label)
-    weights = FactorWeights(**analysis["weights"]) if analysis["weights"] else None
+    weights = MacroWeights(**analysis["weights"]) if analysis["weights"] else None
     return RegimeResponse(autoRegime=slug, regimeLabel=label, weights=weights)
 ```
 
@@ -962,12 +966,21 @@ git commit -m "feat: add GET /api/screener/{market}/regime endpoint"
 
 **Interfaces:**
 - Consumes: `get_screened_df` (Task 4), `REGIME_LABELS` (Task 5), `Market`/`router` (Task 5)
-- Produces: `StockRow`, `ScreenerResponse` Pydantic models (Task 7's position-sizing test fixtures reuse the same `fake_loader`/`fake_screener` shape)
+- Produces: `FactorWeights`, `StockRow`, `ScreenerResponse` Pydantic models (Task 7's position-sizing test fixtures reuse the same `fake_loader`/`fake_screener` shape)
 
-- [ ] **Step 1: Add `StockRow` and `ScreenerResponse` to `schemas.py`**
+Note: `FactorWeights` here is a NEW class, distinct from Task 5's `MacroWeights` — see the "Note on `weights` naming" in Task 5. This `FactorWeights` has fields `value/quality/growth/momentum`, matching `QuantScreener.weights[regime_label]`'s keys exactly (see `fake_screener.weights` in Task 5's `conftest.py`).
+
+- [ ] **Step 1: Add `FactorWeights`, `StockRow`, and `ScreenerResponse` to `schemas.py`**
 
 ```python
 # backend/app/schemas.py — append to existing file
+class FactorWeights(BaseModel):
+    value: float
+    quality: float
+    growth: float
+    momentum: float
+
+
 class StockRow(BaseModel):
     ticker: str
     name: str
@@ -1423,7 +1436,7 @@ git commit -m "chore: scaffold Vite + React + TypeScript + Tailwind + shadcn/ui 
 - Create: `frontend/src/api/screener.ts`
 
 **Interfaces:**
-- Consumes: backend response shapes from Tasks 5, 6, 7 (`RegimeResponse`, `ScreenerResponse`, `PositionSizingResponse` — field names match exactly since both sides use camelCase)
+- Consumes: backend response shapes from Tasks 5, 6, 7 (`RegimeResponse`, `ScreenerResponse`, `PositionSizingResponse` — field names match exactly since both sides use camelCase). Note `RegimeResponse.weights` (`MacroWeights`: trend/macro/sentiment/liquidity/breadth/credit) and `ScreenerResponse.weights` (`FactorWeights`: value/quality/growth/momentum) are two distinct shapes — do not conflate them.
 - Produces: `getRegime(market)`, `getScreener(market, regime)`, `postPositionSizing(market, body)` — Tasks 12, 13, 14 call these.
 
 - [ ] **Step 1: Define shared types**
@@ -1432,6 +1445,15 @@ git commit -m "chore: scaffold Vite + React + TypeScript + Tailwind + shadcn/ui 
 // frontend/src/api/types.ts
 export type Market = "us" | "kr"
 export type RegimeSlug = "risk_on" | "risk_off" | "transition"
+
+export interface MacroWeights {
+  trend: number
+  macro: number
+  sentiment: number
+  liquidity: number
+  breadth: number
+  credit: number
+}
 
 export interface FactorWeights {
   value: number
@@ -1443,7 +1465,7 @@ export interface FactorWeights {
 export interface RegimeResponse {
   autoRegime: RegimeSlug | null
   regimeLabel: string | null
-  weights: FactorWeights | null
+  weights: MacroWeights | null
 }
 
 export interface StockRow {
@@ -2167,4 +2189,5 @@ No commit for this task. If all 5 steps pass, the MVP from `docs/superpowers/spe
 
 - **Spec coverage:** market/regime selection (Tasks 5, 11), ranking table (Task 6, 11), 4 charts (Task 12), position sizing (Tasks 7, 13), caching strategy incl. single-flight locks (Tasks 2, 3, 4), error handling for failed regime calc / empty data / stale cache (Tasks 5, 6, 11), separate repo with copied `modules/` (Task 1), TypeScript + Tailwind + shadcn/ui + Plotly.js stack (Tasks 9, 10, 12) — all covered. Deployment is explicitly out of scope per spec and is not a task here.
 - **Type consistency:** `RegimeSlug` defined once in `app/regimes.py` (backend) and `api/types.ts` (frontend) and reused everywhere else; `StockRow`/`FactorWeights`/`Position` field names are camelCase on both sides with no alias translation needed, checked against each producing task.
+- **Correction (post-Task-5 implementation):** the original version of this plan defined a single `FactorWeights` schema (`value/quality/growth/momentum`) and reused it for both Task 5's `RegimeResponse.weights` and Task 6's `ScreenerResponse.weights` — but these are two different concepts in `modules/`: `AnalysisModel.calculate_attractiveness()`'s regime-blend weights (`trend/macro/sentiment/liquidity/breadth/credit`) versus `QuantScreener.weights[regime_label]`'s per-stock factor weights (`value/quality/growth/momentum`). Task 5's implementer caught this via a real `pydantic.ValidationError` when the brief's own test fixture (`fake_engine.calculate_attractiveness.return_value["weights"]`, keyed `trend/macro/...`) didn't fit the brief's originally-specified `FactorWeights` shape. Fixed by splitting into `MacroWeights` (Task 5, for `RegimeResponse`) and `FactorWeights` (Task 6, for `ScreenerResponse`) — both this plan file and the already-committed Task 5 code were corrected to match.
 - **No placeholders:** every step has literal file contents or literal commands with expected output; no "add error handling here" style steps remain.
