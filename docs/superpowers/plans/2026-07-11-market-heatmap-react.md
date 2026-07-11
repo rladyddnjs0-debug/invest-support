@@ -499,6 +499,21 @@ from app.schemas import HeatmapResponse, HeatmapTile
 router = APIRouter(prefix="/api/heatmap", tags=["heatmap"])
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    # A missing numeric cell survives `.to_dict()` as `float('nan')`, not
+    # `None` — comparisons against NaN are always False, so a plain
+    # `value is None or value <= 0` check silently lets NaN through. Pydantic
+    # accepts NaN as a valid float, but the JSON response encoder does not
+    # (`ValueError: Out of range float values are not JSON compliant: nan`),
+    # crashing the endpoint. Applied to EVERY numeric field read from the
+    # fundamentals row (not just MarketCap, which is where this bug was first
+    # found and fixed narrowly) so this bug class can't recur for a field
+    # nobody thought to check yet.
+    if value is None or pd.isna(value):
+        return default
+    return float(value)
+
+
 @router.get("", response_model=HeatmapResponse)
 async def get_heatmap(cache=Depends(get_cache), loader=Depends(get_loader)) -> HeatmapResponse:
     fund_df = await get_heatmap_fundamentals(cache, loader)
@@ -511,14 +526,8 @@ async def get_heatmap(cache=Depends(get_cache), loader=Depends(get_loader)) -> H
 
     tiles = []
     for r in fund_df.to_dict(orient="records"):
-        market_cap = r.get("MarketCap", 0)
-        # A missing numeric cell survives `.to_dict()` as `float('nan')`, not
-        # `None` — and `nan <= 0` is always False (NaN comparisons never hold),
-        # so a plain `market_cap is None or market_cap <= 0` check silently lets
-        # NaN rows through. Pydantic accepts NaN as a valid float, but the JSON
-        # response encoder does not (`ValueError: Out of range float values are
-        # not JSON compliant: nan`), crashing the endpoint. pd.isna() catches it.
-        if market_cap is None or pd.isna(market_cap) or market_cap <= 0:
+        market_cap = _safe_float(r.get("MarketCap"), default=0.0)
+        if market_cap <= 0:
             continue
         change_info = changes.get(r["Ticker"], {})
         tiles.append(
@@ -527,11 +536,11 @@ async def get_heatmap(cache=Depends(get_cache), loader=Depends(get_loader)) -> H
                 name=r["Name"],
                 sector=r["Sector"],
                 marketCap=market_cap,
-                price=r.get("Price", 0),
+                price=_safe_float(r.get("Price")),
                 change=change_info.get("change", 0.0),
                 afterHoursChange=change_info.get("after_hours_change"),
-                per=r.get("PER", 0),
-                roe=r.get("ROE", 0),
+                per=_safe_float(r.get("PER")),
+                roe=_safe_float(r.get("ROE")),
             )
         )
 
@@ -1008,3 +1017,4 @@ No commit for this task. If all steps pass, this feature is complete.
 - **Type consistency:** `HeatmapTile`/`HeatmapResponse` field names are camelCase and identical between `backend/app/schemas.py` and `frontend/src/api/types.ts`, checked against each producing task.
 - **No placeholders:** every step has literal file contents or literal commands with expected output.
 - **Correction (post-Task-3 review):** the original version of Task 3's router excluded zero/negative/`None` `MarketCap` rows but not `float('nan')` — the actual form a missing numeric cell takes after `.to_dict(orient="records")`. A NaN `MarketCap` isn't caught by `market_cap <= 0` (NaN comparisons are always False) and isn't valid JSON, so it crashed the endpoint with an unhandled 500 instead of being excluded. Found via reviewer-initiated reproduction (the brief's own test only covered an explicit `MarketCap: 0`, not a real NaN). Fixed by adding `pd.isna(market_cap)` to the exclusion check. This plan's Task 3 router code above is updated to match; a regression test (`test_get_heatmap_excludes_nan_market_cap`) was added to `test_heatmap_router.py`.
+- **Correction (post-final-whole-branch-review):** the fix above was applied narrowly — only to `MarketCap` — but `Price`, `PER`, and `ROE` come from the same fundamentals row and suffer the identical crash class: a NaN value in any of these (common for real S&P 500 constituents, e.g. negative-earnings stocks with NaN PER, or yfinance omitting ROE) is not an exclusion criterion but still isn't valid JSON, so it crashed the endpoint the same way. The final reviewer reproduced this live with a valid-`MarketCap`-but-NaN-`PER`/`ROE`/`Price` row. Fixed by introducing a `_safe_float(value, default=0.0)` helper applied to ALL FOUR numeric fields (`marketCap` still excludes non-positive/NaN rows via `continue`; `price`/`per`/`roe` default to `0.0` instead, since they aren't exclusion criteria) — a general fix rather than a fourth one-off field patch. `change`/`afterHoursChange` were investigated and confirmed NOT to need the same guard: `DataLoader.get_daily_changes` (`modules/data_loader.py`, untouched) builds its series via `.dropna()` before use, so its dict values are always real floats, `None`, or the ticker is entirely absent — never NaN. This plan's Task 3 router code above is updated to match; a regression test (`test_get_heatmap_defaults_nan_price_per_roe_but_keeps_tile`) was added to `test_heatmap_router.py`.
