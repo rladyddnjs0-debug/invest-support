@@ -489,6 +489,7 @@ Expected: all 4 fail with `404 Not Found` (route doesn't exist yet) or a collect
 
 ```python
 # backend/app/routers/heatmap.py
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_cache, get_loader
@@ -511,7 +512,13 @@ async def get_heatmap(cache=Depends(get_cache), loader=Depends(get_loader)) -> H
     tiles = []
     for r in fund_df.to_dict(orient="records"):
         market_cap = r.get("MarketCap", 0)
-        if market_cap is None or market_cap <= 0:
+        # A missing numeric cell survives `.to_dict()` as `float('nan')`, not
+        # `None` — and `nan <= 0` is always False (NaN comparisons never hold),
+        # so a plain `market_cap is None or market_cap <= 0` check silently lets
+        # NaN rows through. Pydantic accepts NaN as a valid float, but the JSON
+        # response encoder does not (`ValueError: Out of range float values are
+        # not JSON compliant: nan`), crashing the endpoint. pd.isna() catches it.
+        if market_cap is None or pd.isna(market_cap) or market_cap <= 0:
             continue
         change_info = changes.get(r["Ticker"], {})
         tiles.append(
@@ -1000,3 +1007,4 @@ No commit for this task. If all steps pass, this feature is complete.
 - **Spec coverage:** `ttl_seconds` cache extension (Task 1), both cached helpers with disk-cache reuse (Task 2), the endpoint with all 4 error/edge cases from the spec's error table (Task 3), 30-min polling (Task 7), hover content order including conditional after-hours line and 2-decimal price (Task 6), US-only scope, no tile-click interaction, flat 2-level treemap reusing the screener's implied-roots fix (Task 6) — all covered.
 - **Type consistency:** `HeatmapTile`/`HeatmapResponse` field names are camelCase and identical between `backend/app/schemas.py` and `frontend/src/api/types.ts`, checked against each producing task.
 - **No placeholders:** every step has literal file contents or literal commands with expected output.
+- **Correction (post-Task-3 review):** the original version of Task 3's router excluded zero/negative/`None` `MarketCap` rows but not `float('nan')` — the actual form a missing numeric cell takes after `.to_dict(orient="records")`. A NaN `MarketCap` isn't caught by `market_cap <= 0` (NaN comparisons are always False) and isn't valid JSON, so it crashed the endpoint with an unhandled 500 instead of being excluded. Found via reviewer-initiated reproduction (the brief's own test only covered an explicit `MarketCap: 0`, not a real NaN). Fixed by adding `pd.isna(market_cap)` to the exclusion check. This plan's Task 3 router code above is updated to match; a regression test (`test_get_heatmap_excludes_nan_market_cap`) was added to `test_heatmap_router.py`.
