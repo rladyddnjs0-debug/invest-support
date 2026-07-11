@@ -310,6 +310,13 @@ async def get_market_attractiveness(market_name: str, period: str, cache, loader
         attr_res = engine.calculate_attractiveness(
             prices, spread_df, liquidity_score, breadth_score, credit_spread_df
         )
+        if attr_res is None:
+            # calculate_attractiveness returns None when the fetched price
+            # history has fewer than min_data_points (200) rows — the same
+            # "no meaningful result" case as the main-index-missing check
+            # above, so this function degrades the same way: return None,
+            # which Task 2's router converts to a 503.
+            return None
         lppl_res = engine.run_lppl_fit(prices)
         danger_score = lppl_res["danger_score"] if lppl_res else 0.0
         target_weight = engine.calculate_target_weight(attr_res["score"], danger_score)
@@ -1450,3 +1457,4 @@ No commit for this task. If all steps pass, this feature is complete.
 - **Spec coverage:** market/period selection (Task 7), score+target-weight gauges (Task 5), 6 factor cards (Task 5), plain price chart without LPPL overlay (Task 7, inline per the spec's resolved ambiguity), yield charts + spread chart (Task 6), 6 macro mini-charts (Task 6), LPPL computed internally only for target weight without exposing details (Task 1), individual-ticker-failure graceful degradation (Task 1's `_macro_metric`/`_yield_metric` None-handling, tested in Task 1), 503 on main index failure (Task 1 returns `None`, Task 2's router converts to `HTTPException`) — all covered.
 - **Type consistency:** `AttractivenessResponse` and all sub-schemas use identical camelCase field names between `backend/app/schemas.py` and `frontend/src/api/types.ts`, checked against each producing task. `MacroWeights` reused from the screener feature without redefinition on either side.
 - **No placeholders:** every step has literal file contents or literal commands with expected output.
+- **Correction (post-Task-1 review):** the original version of Task 1's helper called `engine.calculate_attractiveness(...)` and immediately accessed `attr_res["score"]`/`["regime"]`/`["raw_scores"][...]`/`["weights"]` with no `None` check — but `AnalysisModel.calculate_attractiveness` (`modules/models.py`) returns `None` whenever the fetched price history has fewer than `min_data_points` (200) rows, which would crash with `TypeError: 'NoneType' object is not subscriptable`. The SAME function already correctly guarded the analogous `run_lppl_fit` call one line later (`danger_score = lppl_res["danger_score"] if lppl_res else 0.0`), making the omission a clear oversight rather than a deliberate choice — and the mocked test suite never caught it because the mock's `calculate_attractiveness.return_value` was always a valid dict. Fixed by adding `if attr_res is None: return None` immediately after the call, matching the existing main-index-missing contract (Task 2's router converts either `None` case to a 503). A regression test (`test_get_market_attractiveness_returns_none_when_insufficient_price_history`) was added to `test_attractiveness.py`. This plan's Task 1 code block above is updated to match.
