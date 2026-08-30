@@ -425,3 +425,22 @@ def test_get_stock_fundamentals_kr_momentum_uses_12_1_window(mock_ticker, mock_d
         expected_start = (target_date - timedelta(days=395)).strftime("%Y%m%d")
         expected_end = (target_date - timedelta(days=30)).strftime("%Y%m%d")
         mock_mom.assert_called_once_with(expected_start, expected_end)
+
+
+def test_load_watchlist_returns_empty_list_when_no_file(clean_data_loader):
+    assert clean_data_loader.load_watchlist() == []
+
+
+def test_save_then_load_watchlist_round_trips(clean_data_loader):
+    loader = clean_data_loader
+    loader.save_watchlist(["AAPL", "005930.KS"])
+
+    assert loader.load_watchlist() == ["AAPL", "005930.KS"]
+
+
+def test_save_watchlist_overwrites_previous_contents(clean_data_loader):
+    loader = clean_data_loader
+    loader.save_watchlist(["AAPL"])
+    loader.save_watchlist(["MSFT", "GOOGL"])
+
+    assert loader.load_watchlist() == ["MSFT", "GOOGL"]

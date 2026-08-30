@@ -6,7 +6,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from modules.data_loader import DataLoader
-from modules.models import AnalysisModel, QuantScreener, resolve_regime_choice
+from modules.models import (
+    AnalysisModel, QuantScreener, resolve_regime_choice,
+    filter_screener_df, build_saveticker_url,
+)
 from modules.ai_reporter import AIReporter
 from modules.backtester import QuantBacktester
 from datetime import datetime
@@ -132,7 +135,6 @@ def show_stock_details(ticker):
 
     # 세션 상태 초기화 (팝업 내 데이터 유지용)
     if f"lppl_{ticker}" not in st.session_state: st.session_state[f"lppl_{ticker}"] = None
-    if f"news_{ticker}" not in st.session_state: st.session_state[f"news_{ticker}"] = None
     if f"ai_report_{ticker}" not in st.session_state: st.session_state[f"ai_report_{ticker}"] = None
 
     # 데이터 로드
@@ -222,33 +224,9 @@ def show_stock_details(ticker):
         st.plotly_chart(fig_sw, use_container_width=True)
 
         st.markdown("---")
-        # 뉴스 섹션
-        st.subheader("📰 최근 소식 및 AI 분석")
-        if st.session_state[f"news_{ticker}"]:
-            st.markdown(st.session_state[f"news_{ticker}"])
-        
-        if st.button(f"{ticker} 최신 뉴스 분석", width="stretch"):
-            with st.spinner('뉴스 수집 및 분석 중...'):
-                import yfinance as yf
-                news = yf.Ticker(ticker).news
-                if news:
-                    news_text = ""
-                    for item in news[:5]:
-                        c = item.get('content', item)
-                        t_str = c.get('title', '제목 없음').replace("[", "(").replace("]", ")")
-                        l = c.get('canonicalUrl', {}).get('url', '#')
-                        p = c.get('provider', {}).get('displayName', 'N/A')
-                        news_text += f"- **[{t_str}]({l})** ({p})\n"
-                    
-                    if reporter.model:
-                        try:
-                            prompt = f"다음 뉴스들을 분석하여 투자 영향을 한국어로 요약하라:\n" + "\n".join([n.get('content', n).get('title', '') for n in news[:5]])
-                            summary = reporter.model.generate_content(prompt).text
-                            news_text += f"\n---\n#### 💡 AI 인사이트\n{summary}"
-                        except Exception as e:
-                            logger.error(f"AI News summary generation failed: {e}")
-                    st.session_state[f"news_{ticker}"] = news_text
-                    st.rerun() # Fragment 리런
+        # 뉴스 섹션 (세이브티커 연동)
+        st.subheader("📰 최근 소식")
+        st.link_button(f"📰 세이브티커에서 {ticker} 뉴스 보기", build_saveticker_url(ticker), width="stretch")
 
         st.markdown("---")
         # AI 리포트
@@ -331,7 +309,7 @@ if st.session_state.get('should_clear_portfolio'):
 
 if st.session_state.get('should_clear_screener'):
     if "screener_main_table" in st.session_state:
-        st.session_state["screener_main_table"] = {"selection": {"rows": [], "columns": []}}
+        st.session_state["screener_main_table"] = {"selection": {"rows": [], "columns": [], "cells": []}}
     st.session_state.should_clear_screener = False
 
 # --- 공통 데이터 로드 (메뉴 로직 전 수행) ---
@@ -895,7 +873,6 @@ elif menu == "💼 나의 포트폴리오":
             
             # 1. 티커 관련 상태 강제 초기화
             st.session_state[f"lppl_{selected_ticker}"] = None
-            st.session_state[f"news_{selected_ticker}"] = None
             st.session_state[f"ai_report_{selected_ticker}"] = None
             if f"tv_symbol_{selected_ticker}" in st.session_state:
                 del st.session_state[f"tv_symbol_{selected_ticker}"]
@@ -1044,6 +1021,9 @@ elif menu == "🔍 종목 스크리너":
     
     st.sidebar.header("⚙️ 스크리닝 설정")
     market_type = st.sidebar.radio("대상 시장", ["US (S&P500)", "KR (KOSPI 200)"])
+    watchlist_only = st.sidebar.checkbox("⭐ 관심종목만 보기", value=False)
+    if watchlist_only:
+        st.sidebar.caption("현재 선택된 시장 유니버스 내의 관심종목만 표시됩니다.")
 
     market_name_key = "us"
     if market_type == "US (S&P500)":
@@ -1125,11 +1105,20 @@ elif menu == "🔍 종목 스크리너":
                 - 성장성: `{screener.weights[regime_choice]['growth']*100:.0f}%` / 모멘텀: `{screener.weights[regime_choice]['momentum']*100:.0f}%`
             """)
 
+        # 검색 및 관심종목 필터
+        watchlist = loader.load_watchlist()
+        search_query = st.text_input("🔍 티커 또는 종목명 검색", value="", placeholder="예: AAPL, Samsung")
+        display_df = filter_screener_df(
+            screened_df, search_query=search_query,
+            watchlist_only=watchlist_only, watchlist_tickers=watchlist
+        ).copy()
+        display_df['⭐'] = display_df['Ticker'].isin(watchlist).map({True: '⭐', False: '☆'})
+
         # 표시용 컬럼 안전하게 선택 (컬럼이 없을 경우를 대비)
-        available_cols = screened_df.columns.tolist()
-        requested_cols = ['Ticker', 'Name', 'Sector', 'FinalScore', 'PER', 'PBR', 'ROE', 'Momentum']
+        available_cols = display_df.columns.tolist()
+        requested_cols = ['⭐', 'Ticker', 'Name', 'Sector', 'FinalScore', 'PER', 'PBR', 'ROE', 'Momentum']
         display_cols = [c for c in requested_cols if c in available_cols]
-        
+
         # 포맷팅할 컬럼들도 존재하는 것만 추려냄
         format_dict = {
             'FinalScore': '{:.1f}',
@@ -1140,14 +1129,18 @@ elif menu == "🔍 종목 스크리너":
         }
         actual_format = {k: v for k, v in format_dict.items() if k in display_cols}
 
-        # 행 선택 기능이 통합된 데이터프레임
+        if display_df.empty:
+            st.info("검색/필터 조건에 맞는 종목이 없습니다.")
+
+        # 셀 선택 기능이 통합된 데이터프레임 ('⭐' 컬럼 클릭 시 관심종목 토글, 그 외 클릭 시 상세 팝업)
         event = st.dataframe(
-            screened_df[display_cols].style.format(actual_format).background_gradient(
-                subset=[c for c in ['FinalScore', 'Momentum'] if c in display_cols], 
+            display_df[display_cols].style.format(actual_format).background_gradient(
+                subset=[c for c in ['FinalScore', 'Momentum'] if c in display_cols],
                 cmap='RdYlGn'
             ),
             width="stretch",
             column_config={
+                "⭐": st.column_config.TextColumn("⭐", help="클릭하면 관심종목에 추가/제거합니다."),
                 "FinalScore": st.column_config.NumberColumn("종합 점수", help="레짐별 가중치가 적용된 0~100점 사이의 최종 퀀트 점수입니다."),
                 "PER": st.column_config.NumberColumn("PER", help="주가수익비율. 적자 기업은 랭킹에서 페널티를 받습니다."),
                 "PBR": st.column_config.NumberColumn("PBR", help="주가순자산비율. 자산 가치 대비 저평가 여부를 나타냅니다."),
@@ -1155,34 +1148,45 @@ elif menu == "🔍 종목 스크리너":
                 "Momentum": st.column_config.NumberColumn("모멘텀", help="최근 수익률의 백분위 순위가 반영된 점수입니다.")
             },
             on_select="rerun",
-            selection_mode="single-row",
+            selection_mode="single-cell",
             key="screener_main_table"
         )
-        
-        # 테이블에서 선택된 티커 확인
-        if event and len(event.selection.rows) > 0:
-            selected_row_idx = event.selection.rows[0]
-            selected_ticker = screened_df.iloc[selected_row_idx]['Ticker']
-            selected_name = screened_df.iloc[selected_row_idx]['Name']
-            
-            # 1. 티커 관련 상태 강제 초기화
-            st.session_state[f"lppl_{selected_ticker}"] = None
-            st.session_state[f"news_{selected_ticker}"] = None
-            st.session_state[f"ai_report_{selected_ticker}"] = None
-            if f"tv_symbol_{selected_ticker}" in st.session_state:
-                del st.session_state[f"tv_symbol_{selected_ticker}"]
-            
-            # 2. 글로벌 팝업 티커 설정
-            st.session_state.active_ticker = selected_ticker
-            
-            # 3. 테이블 선택 상태 지연 초기화 설정
-            st.session_state.should_clear_screener = True
-            
-            # 안내 및 재실행
-            st.success(f"📍 {selected_name} ({selected_ticker}) 분석 중...")
-            st.rerun()
 
-        st.caption("💡 표의 행이나 셀을 클릭하면 해당 종목의 상세 분석 팝업이 열립니다.")
+        # 테이블에서 선택된 셀 확인
+        if event and len(event.selection.cells) > 0:
+            selected_row_idx, selected_col = event.selection.cells[0]
+            clicked_ticker = display_df.iloc[selected_row_idx]['Ticker']
+
+            if selected_col == '⭐':
+                # 관심종목 토글
+                if clicked_ticker in watchlist:
+                    watchlist = [t for t in watchlist if t != clicked_ticker]
+                else:
+                    watchlist = watchlist + [clicked_ticker]
+                loader.save_watchlist(watchlist)
+                st.session_state.should_clear_screener = True
+                st.rerun()
+            else:
+                selected_ticker = clicked_ticker
+                selected_name = display_df.iloc[selected_row_idx]['Name']
+
+                # 1. 티커 관련 상태 강제 초기화
+                st.session_state[f"lppl_{selected_ticker}"] = None
+                st.session_state[f"ai_report_{selected_ticker}"] = None
+                if f"tv_symbol_{selected_ticker}" in st.session_state:
+                    del st.session_state[f"tv_symbol_{selected_ticker}"]
+
+                # 2. 글로벌 팝업 티커 설정
+                st.session_state.active_ticker = selected_ticker
+
+                # 3. 테이블 선택 상태 지연 초기화 설정
+                st.session_state.should_clear_screener = True
+
+                # 안내 및 재실행
+                st.success(f"📍 {selected_name} ({selected_ticker}) 분석 중...")
+                st.rerun()
+
+        st.caption("💡 '⭐' 셀을 클릭하면 관심종목 추가/제거, 그 외 셀을 클릭하면 해당 종목의 상세 분석 팝업이 열립니다.")
 
         # Phase 4: 추천 포지션 사이징 섹션 (실전화 개편)
         st.markdown("---")
