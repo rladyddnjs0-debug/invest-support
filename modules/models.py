@@ -12,6 +12,31 @@ def resolve_regime_choice(auto_regime, use_manual_override, manual_choice):
     return auto_regime
 
 
+def filter_screener_df(df, search_query="", watchlist_only=False, watchlist_tickers=None):
+    """
+    스크리너 결과를 티커/종목명 검색어와 관심종목 여부로 필터링한다.
+    검색어는 Ticker 또는 Name에 대소문자 구분 없이 포함(substring)되면 매치된다.
+    """
+    result = df
+    query = (search_query or "").strip().lower()
+    if query:
+        ticker_match = result['Ticker'].astype(str).str.lower().str.contains(query, regex=False)
+        name_match = result['Name'].astype(str).str.lower().str.contains(query, regex=False)
+        result = result[ticker_match | name_match]
+
+    if watchlist_only:
+        tickers = set(watchlist_tickers or [])
+        result = result[result['Ticker'].isin(tickers)]
+
+    return result
+
+
+def build_saveticker_url(ticker):
+    """세이브티커(saveticker.com) 종목 페이지 URL을 만든다. KR 티커의 .KS/.KQ 접미사는 제거한다."""
+    clean_ticker = ticker.replace(".KS", "").replace(".KQ", "")
+    return f"https://www.saveticker.com/company/{clean_ticker}"
+
+
 class AnalysisModel:
     def __init__(self):
         self.config = settings.lppl

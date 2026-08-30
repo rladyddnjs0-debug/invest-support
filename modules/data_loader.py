@@ -56,6 +56,7 @@ class DataLoader:
         }
         self.sample_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "UNH", "JNJ"]
         self.portfolio_path = os.path.join(self.data_dir, "portfolio.json")
+        self.watchlist_path = os.path.join(self.data_dir, "watchlist.json")
 
     def save_portfolio(self, portfolio_data):
         import json
@@ -66,6 +67,18 @@ class DataLoader:
         import json
         if os.path.exists(self.portfolio_path):
             with open(self.portfolio_path, 'r') as f:
+                return json.load(f)
+        return []
+
+    def save_watchlist(self, tickers):
+        import json
+        with open(self.watchlist_path, 'w') as f:
+            json.dump(tickers, f, indent=4)
+
+    def load_watchlist(self):
+        import json
+        if os.path.exists(self.watchlist_path):
+            with open(self.watchlist_path, 'r') as f:
                 return json.load(f)
         return []
 

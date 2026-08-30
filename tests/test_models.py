@@ -1,7 +1,10 @@
 import pytest
 import pandas as pd
 import numpy as np
-from modules.models import AnalysisModel, QuantScreener, resolve_regime_choice
+from modules.models import (
+    AnalysisModel, QuantScreener, resolve_regime_choice,
+    filter_screener_df, build_saveticker_url,
+)
 
 
 def _build_ohlc(closes, high=100.0, low=0.0, start="2023-01-01"):
@@ -358,3 +361,63 @@ def test_calculate_stoch_williams_ignores_trailing_incomplete_bar():
     assert pd.notna(ind['k'].iloc[-1])
     assert pd.notna(ind['r'].iloc[-1])
     assert signal == "매수 확정"
+
+
+def _build_screener_df():
+    return pd.DataFrame({
+        'Ticker': ['AAPL', 'GOOGL', 'MSFT', '005930.KS'],
+        'Name': ['Apple Inc.', 'Alphabet Inc.', 'Microsoft Corporation', 'Samsung Electronics'],
+    })
+
+
+def test_filter_screener_df_no_filters_returns_all_rows():
+    df = _build_screener_df()
+    result = filter_screener_df(df)
+    assert len(result) == 4
+
+
+def test_filter_screener_df_matches_ticker_case_insensitively():
+    df = _build_screener_df()
+    result = filter_screener_df(df, search_query="aapl")
+    assert result['Ticker'].tolist() == ['AAPL']
+
+
+def test_filter_screener_df_matches_name_substring():
+    df = _build_screener_df()
+    result = filter_screener_df(df, search_query="samsung")
+    assert result['Ticker'].tolist() == ['005930.KS']
+
+
+def test_filter_screener_df_blank_query_returns_all_rows():
+    df = _build_screener_df()
+    result = filter_screener_df(df, search_query="   ")
+    assert len(result) == 4
+
+
+def test_filter_screener_df_watchlist_only():
+    df = _build_screener_df()
+    result = filter_screener_df(df, watchlist_only=True, watchlist_tickers=['MSFT', '005930.KS'])
+    assert sorted(result['Ticker'].tolist()) == ['005930.KS', 'MSFT']
+
+
+def test_filter_screener_df_watchlist_only_with_no_watchlist_returns_empty():
+    df = _build_screener_df()
+    result = filter_screener_df(df, watchlist_only=True, watchlist_tickers=[])
+    assert result.empty
+
+
+def test_filter_screener_df_combines_search_and_watchlist():
+    df = _build_screener_df()
+    result = filter_screener_df(
+        df, search_query="inc", watchlist_only=True, watchlist_tickers=['GOOGL']
+    )
+    assert result['Ticker'].tolist() == ['GOOGL']
+
+
+def test_build_saveticker_url_us_ticker():
+    assert build_saveticker_url("GOOGL") == "https://www.saveticker.com/company/GOOGL"
+
+
+def test_build_saveticker_url_strips_kr_suffix():
+    assert build_saveticker_url("005930.KS") == "https://www.saveticker.com/company/005930"
+    assert build_saveticker_url("005930.KQ") == "https://www.saveticker.com/company/005930"
