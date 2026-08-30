@@ -70,11 +70,6 @@ def render_yield_chart(name, height=400):
     else:
         st.error("데이터를 가져올 수 없습니다.")
 
-@st.cache_data(ttl=3600*24) # 24시간 캐시
-def get_cached_historical_per(ticker, force_download=False):
-    """역사적 PER 계산 결과를 캐싱하여 API 호출 최소화"""
-    return engine.calculate_historical_per_bands(ticker, force_download=force_download)
-
 @st.cache_data(ttl=1800) # 30분 캐시 (당일 등락률은 신선도가 중요하므로 짧게 유지)
 def get_cached_daily_changes(tickers):
     """당일 등락률을 캐싱하여 히트맵 재렌더링 시 불필요한 API 호출 방지"""
@@ -185,42 +180,6 @@ def show_stock_details(ticker):
                     st.session_state[f"lppl_{ticker}"] = engine.run_lppl_fit(prices)
                     st.rerun() # Fragment만 리런
 
-            # --- Milestone 01: 펀더멘털 시나리오 분석 ---
-            st.markdown("---")
-            st.write("#### 💎 펀더멘털 가치 평가")
-            
-            # 관심 종목에 대한 시나리오 계산
-            fund_df = loader.get_stock_fundamentals([ticker], market_name="us" if ".KS" not in ticker and ".KQ" not in ticker else "kr")
-            if not fund_df.empty:
-                row = fund_df.iloc[0]
-                fwd_eps = row.get('ForwardEPS', 0)
-                curr_price = row.get('Price', 0)
-                
-                scenarios = engine.calculate_valuation_scenarios(ticker, fwd_eps, curr_price)
-                if scenarios:
-                    s = scenarios['scenarios']
-                    pos = scenarios['position_pct']
-                    
-                    st.write(f"**현재 위치: {pos:.1f}% (Bear ↔ Bull)**")
-                    # 프로그레스 바 형태로 위치 시각화
-                    st.progress(pos / 100.0)
-                    
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Bear", f"{s['bear']:,.1f}")
-                    c2.metric("Base", f"{s['base']:,.1f}")
-                    c3.metric("Bull", f"{s['bull']:,.1f}")
-                    
-                    st.caption(f"12M Forward EPS: {fwd_eps:,.2f} 기준")
-                    
-                    if curr_price <= s['bear']:
-                        st.success("🎯 **매수 기회:** 주가가 Bear Case 이하로 저평가 상태입니다.")
-                    elif curr_price >= s['bull']:
-                        st.error("🚫 **매수 금지:** 주가가 Bull Case 이상으로 고평가 상태입니다.")
-                else:
-                    st.info("해당 종목의 밸류에이션 매트릭스 정보가 없습니다.")
-            else:
-                st.info("재무 데이터를 불러올 수 없습니다.")
-
         st.markdown("---")
         # 뉴스 섹션
         st.subheader("📰 최근 소식 및 AI 분석")
@@ -305,12 +264,6 @@ if st.sidebar.button("🔍 종목 스크리너", width="stretch",
 if st.sidebar.button("🗺️ 마켓 히트맵", width="stretch",
                      type="primary" if st.session_state.menu == "🗺️ 마켓 히트맵" else "secondary"):
     st.session_state.menu = "🗺️ 마켓 히트맵"
-    st.session_state.active_ticker = None
-    st.rerun()
-
-if st.sidebar.button("💎 펀더멘털 가치평가", width="stretch",
-                     type="primary" if st.session_state.menu == "💎 펀더멘털 가치평가" else "secondary"):
-    st.session_state.menu = "💎 펀더멘털 가치평가"
     st.session_state.active_ticker = None
     st.rerun()
 
@@ -1482,142 +1435,6 @@ elif menu == "🗺️ 마켓 히트맵":
             st.plotly_chart(fig_heatmap, width="stretch")
 
             st.caption(f"펀더멘털(시총/섹터) 캐시는 최대 {settings.data_loader.cache_expiry_days}일, 등락률은 최대 30분 주기로 갱신됩니다.")
-
-elif menu == "💎 펀더멘털 가치평가":
-    st.title("💎 펀더멘털 가치평가 (Scenario Analysis)")
-    st.markdown("""
-    설정된 **가치평가 매트릭스**를 바탕으로, 주요 종목의 적정 주가 밴드와 현재 위치를 정량적으로 분석합니다.
-    - **Bear**: 하락 시나리오에서의 강력한 지지선 (보수적 멀티플 적용)
-    - **Base**: 현재 펀더멘털과 시장 평균을 반영한 적정가
-    - **Bull**: 성장 가속 및 낙관적 시장 환경에서의 목표가
-    """)
-    
-    # 관심 종목 리스트 (matrix에 정의된 종목들)
-    tickers = list(engine.valuation_matrix.keys())
-    
-    if not tickers:
-        st.warning("설정된 가치평가 종목이 없습니다. `config/valuation_matrix.json`을 확인해주세요.")
-    else:
-        c1, c2, c3 = st.columns([2, 1, 1])
-        with c1:
-            st.markdown("가치평가 대상: " + ", ".join(tickers))
-        with c2:
-            valuation_mode = st.radio("밸류에이션 모드", ["Manual Matrix", "Dynamic Historical"], horizontal=True)
-        with c3:
-            force_refresh = st.button("🔄 데이터 새로고침", use_container_width=True)
-
-        # 데이터 로드
-        with st.spinner('종목별 펀더멘털 데이터 수집 중...'):
-            fund_df = loader.get_stock_fundamentals(tickers, market_name="us", force_download=force_refresh)
-            if force_refresh:
-                st.success("최신 데이터로 갱신되었습니다!")
-            
-        if fund_df is not None and not fund_df.empty:
-            found_count = 0
-            for i, ticker in enumerate(tickers):
-                row = fund_df[fund_df['Ticker'].str.upper() == ticker.upper()]
-                if not row.empty:
-                    found_count += 1
-                    row = row.iloc[0]
-                    fwd_eps = row.get('ForwardEPS', 0)
-                    curr_price = row.get('Price', 0)
-                    
-                    # 1. 밸류에이션 시나리오 결정 (수동 vs 자동)
-                    if valuation_mode == "Manual Matrix":
-                        res = engine.calculate_valuation_scenarios(ticker, fwd_eps, curr_price)
-                        mode_label = "(Matrix 기준)"
-                    else:
-                        with st.spinner(f"{ticker} 역사적 PER 분석 중..."):
-                            hist_bands = get_cached_historical_per(ticker, force_download=force_refresh)
-                            if hist_bands:
-                                # 자동 산출된 PER를 Forward EPS에 적용
-                                scenarios = {
-                                    'bull': fwd_eps * hist_bands['bull'],
-                                    'base': fwd_eps * hist_bands['base'],
-                                    'bear': fwd_eps * hist_bands['bear']
-                                }
-                                # 현재가 위치 계산 (%)
-                                if scenarios['bull'] > scenarios['bear']:
-                                    pos = (curr_price - scenarios['bear']) / (scenarios['bull'] - scenarios['bear']) * 100
-                                else: pos = 50.0
-                                
-                                res = {
-                                    'scenarios': scenarios,
-                                    'current_price': curr_price,
-                                    'position_pct': pos,
-                                    'ticker_name': row.get('Name', ticker),
-                                    'hist_bands': hist_bands # 상세 데이터 포함
-                                }
-                                mode_label = f"(역사적 5년 PER 기준: {hist_bands['base']:.1f}x)"
-                            else:
-                                res = None
-                                st.error(f"{ticker}의 역사적 데이터를 분석할 수 없어 Manual Matrix로 대체합니다.")
-                                res = engine.calculate_valuation_scenarios(ticker, fwd_eps, curr_price)
-                                mode_label = "(Matrix로 자동 전환)"
-
-                    if res:
-                        s = res['scenarios']
-                        pos = res['position_pct']
-                        
-                        st.markdown(f"### {res['ticker_name']} ({ticker}) {mode_label}")
-                        # ... (rest of display logic)
-                        
-                        # 3분할 표시
-                        m1, m2, m3 = st.columns(3)
-                        m1.metric("Bear Case", f"${s['bear']:,.1f}")
-                        m2.metric("Base Case", f"${s['base']:,.1f}")
-                        m3.metric("Bull Case", f"${s['bull']:,.1f}")
-                        
-                        st.write(f"현재가: **${curr_price:,.2f}** (밴드 내 위치: **{pos:.1f}%**)")
-                        
-                        # 차트 시각화
-                        hist_data = loader.get_market_history(ticker, period="1y")
-                        if hist_data is not None and not hist_data.empty:
-                            fig_val = go.Figure()
-                            fig_val.add_trace(go.Scatter(x=hist_data.index, y=hist_data['Close'], 
-                                                       name='Price', line=dict(color='white', width=1.5), opacity=0.7))
-                            
-                            fig_val.add_hline(y=s['bull'], line_dash="dash", line_color="#ff4b4b", 
-                                            annotation_text=f"Bull ({s['bull']:,.0f})", annotation_position="top right")
-                            fig_val.add_hline(y=s['base'], line_dash="dot", line_color="#31333f", 
-                                            annotation_text=f"Base ({s['base']:,.0f})", annotation_position="top right")
-                            fig_val.add_hline(y=s['bear'], line_dash="dash", line_color="#00c04b", 
-                                            annotation_text=f"Bear ({s['bear']:,.0f})", annotation_position="bottom right")
-                            
-                            fig_val.add_hrect(y0=s['bear'], y1=s['base'], fillcolor="green", opacity=0.05, line_width=0)
-                            fig_val.add_hrect(y0=s['base'], y1=s['bull'], fillcolor="orange", opacity=0.05, line_width=0)
-                            
-                            fig_val.add_trace(go.Scatter(x=[hist_data.index[-1]], y=[curr_price],
-                                                       mode='markers+text', name='Current',
-                                                       text=[f"  ${curr_price:,.1f}"], textposition="middle right",
-                                                       marker=dict(color='yellow', size=10, symbol='diamond')))
-
-                            fig_val.update_layout(title=f"{ticker} 가치평가 밴드 추이 {mode_label}", template="plotly_dark", height=450, yaxis_title="Price ($)", showlegend=False)
-                            st.plotly_chart(fig_val, use_container_width=True)
-                        
-                        # 자동 모드일 때 추가 통계 제공
-                        if valuation_mode == "Dynamic Historical" and 'hist_bands' in res:
-                            with st.expander(f"📊 {ticker} 역사적 PER 분포 상세"):
-                                h = res['hist_bands']
-                                st.write(f"- **최근 5년 PER 범위:** {h['min']:.1f}x ~ {h['max']:.1f}x")
-                                st.write(f"- **현재(Trailing) PER:** {h['current']:.1f}x")
-                                st.write(f"- **적용된 밴드 (25% / 50% / 75%):** {h['bear']:.1f}x / {h['base']:.1f}x / {h['bull']:.1f}x")
-                        
-                        if curr_price <= s['bear']:
-                            st.success(f"🎯 **매수 기회:** {ticker}가 역사적/수동 저평가 임계점에 도달했습니다.")
-                        elif curr_price >= s['bull']:
-                            st.error(f"🚫 **주의:** {ticker}가 역사적/수동 고평가 임계점을 상회했습니다.")
-                            
-                        st.markdown("---")
-                    else:
-                        st.warning(f"⚠️ **{ticker}**: 가치 평가를 위한 핵심 데이터(EPS 등)를 API로부터 가져오지 못했습니다. Yahoo Finance 차단이 해제된 후 '데이터 새로고침'을 시도해 주세요.")
-                        st.markdown("---")
-            
-            if found_count == 0:
-                st.warning("설정된 종목들을 데이터에서 찾을 수 없습니다. 티커명을 확인해주세요.")
-                st.write("불러온 데이터 티커 목록:", fund_df['Ticker'].tolist())
-        else:
-            st.error("종목 데이터를 불러오는 데 실패했습니다. 잠시 후 다시 시도하거나 '데이터 새로고침'을 눌러주세요.")
 
 elif menu == "🚀 실시간 마켓 모니터":
     st.title("🚀 실시간 마켓 모니터 (5분봉)")
