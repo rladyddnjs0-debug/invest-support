@@ -136,6 +136,67 @@ def test_get_market_history(mock_download, clean_data_loader):
     assert len(res2) == 3
 
 @patch('yfinance.download')
+def test_get_market_history_trims_trailing_incomplete_bar(mock_download, clean_data_loader):
+    """yfinance가 아직 확정되지 않은 마지막 봉(OHLC가 전부 NaN)을 반환하면 잘라내야 한다."""
+    loader = clean_data_loader
+
+    mock_df = pd.DataFrame({
+        'Close': [100.0, 101.0, np.nan],
+        'High': [101.0, 102.0, np.nan],
+        'Low': [99.0, 100.0, np.nan],
+        'Open': [99.5, 100.5, np.nan],
+        'Volume': [1000, 1100, 900],
+    }, index=pd.date_range(start="2023-01-01", periods=3))
+    mock_download.return_value = mock_df
+
+    result = loader.get_market_history("S&P500", period="1y")
+
+    assert len(result) == 2
+    assert not result['Close'].isna().any()
+
+
+@patch('yfinance.download')
+def test_get_market_history_trims_trailing_incomplete_bar_from_cache(mock_download, clean_data_loader):
+    """이미 저장된 캐시 파일의 마지막 행이 NaN이어도(과거에 저장된 미확정 봉) 잘라내야 한다."""
+    loader = clean_data_loader
+    cache_file = os.path.join(loader.data_dir, "s&p500_1d_history.csv")
+
+    stale_df = pd.DataFrame({
+        'Close': [100.0, 101.0, np.nan],
+        'High': [101.0, 102.0, np.nan],
+        'Low': [99.0, 100.0, np.nan],
+        'Open': [99.5, 100.5, np.nan],
+        'Volume': [1000, 1100, 900],
+    }, index=pd.date_range(start="2023-01-01", periods=3))
+    stale_df.to_csv(cache_file)
+
+    result = loader.get_market_history("S&P500", period="1y")
+
+    assert mock_download.call_count == 0  # 캐시가 오늘 날짜이므로 다운로드 없이 캐시 사용
+    assert len(result) == 2
+    assert not result['Close'].isna().any()
+
+
+@patch('yfinance.download')
+def test_get_market_history_keeps_non_trailing_nan_rows(mock_download, clean_data_loader):
+    """마지막 봉이 아닌 중간의 결측치는(예: 휴장일 데이터 공백) 그대로 유지되어야 한다."""
+    loader = clean_data_loader
+
+    mock_df = pd.DataFrame({
+        'Close': [100.0, np.nan, 102.0],
+        'High': [101.0, np.nan, 103.0],
+        'Low': [99.0, np.nan, 101.0],
+        'Open': [99.5, np.nan, 101.5],
+        'Volume': [1000, 0, 1200],
+    }, index=pd.date_range(start="2023-01-01", periods=3))
+    mock_download.return_value = mock_df
+
+    result = loader.get_market_history("S&P500", period="1y")
+
+    assert len(result) == 3
+
+
+@patch('yfinance.download')
 def test_get_yield_spread(mock_download, clean_data_loader):
     loader = clean_data_loader
 

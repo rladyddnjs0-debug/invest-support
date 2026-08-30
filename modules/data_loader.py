@@ -322,7 +322,7 @@ class DataLoader:
                 should_download = True
             
             if not should_download:
-                return pd.read_csv(file_path, index_col=0, parse_dates=True)
+                return self._trim_trailing_incomplete_bar(pd.read_csv(file_path, index_col=0, parse_dates=True))
 
         if should_download:
             max_retries = 3
@@ -333,7 +333,7 @@ class DataLoader:
                     if not data.empty:
                         if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
                         data.to_csv(file_path)
-                        return data
+                        return self._trim_trailing_incomplete_bar(data)
                     break  # 빈 데이터는 재시도 없이 종료 (심볼 자체에 데이터가 없는 경우)
                 except Exception as e:
                     if "Too Many Requests" in str(e) and attempt < max_retries - 1:
@@ -346,8 +346,22 @@ class DataLoader:
             # 재시도 후에도 실패 시, 기존 캐시가 있다면 만료됐더라도 반환 (완전 실패보다 낫음)
             if os.path.exists(file_path):
                 logger.warning(f"Returning stale cache for {ticker_symbol} after download failure.")
-                return pd.read_csv(file_path, index_col=0, parse_dates=True)
+                return self._trim_trailing_incomplete_bar(pd.read_csv(file_path, index_col=0, parse_dates=True))
         return None
+
+    @staticmethod
+    def _trim_trailing_incomplete_bar(data):
+        """
+        yfinance가 아직 확정되지 않은 마지막 봉(장중 데이터 미반영 등으로 OHLC가
+        전부 NaN)을 반환하는 경우가 있어, 마지막에서부터 Close가 NaN인 행을 제거한다.
+        중간에 있는 결측치(예: 휴장일 데이터 공백)는 그대로 유지한다.
+        """
+        if data is None or data.empty or 'Close' not in data.columns:
+            return data
+        trimmed = data
+        while len(trimmed) > 0 and pd.isna(trimmed['Close'].iloc[-1]):
+            trimmed = trimmed.iloc[:-1]
+        return trimmed
 
     def _is_regular_market_hours(self):
         """미국 동부시간 기준 정규장(평일 09:30~16:00 ET) 여부. 공휴일은 반영하지 않는 근사치."""
