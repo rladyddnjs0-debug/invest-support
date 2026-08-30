@@ -17,7 +17,72 @@ class AnalysisModel:
         self.config = settings.lppl
         self.attr_config = settings.attractiveness
         self.port_config = settings.portfolio
+        self.sw_config = settings.stoch_williams
         self.lppl_engine = LPPLEngine(num_iterations=self.config.num_iterations)
+
+    def calculate_stoch_williams(self, data):
+        """
+        Stochastic(%K/%D)과 Williams %R을 계산한다.
+        %K는 Fast%K를 k_smooth일 이동평균한 Slow%K, %D는 그 Slow%K를 d_period일
+        이동평균한 값이다. Williams %R은 별도 스무딩 없이 wr_period 기준 원값을 사용한다.
+        """
+        cfg = self.sw_config
+        # 최신 봉이 장중/미확정 데이터라 High/Low/Close가 비어 있는 경우가 있어
+        # (예: yfinance가 당일 캔들을 아직 채우지 못한 경우) 신호가 항상 N/A로
+        # 보이지 않도록 유효한 마지막 봉 기준으로 계산한다.
+        data = data.dropna(subset=['High', 'Low', 'Close'])
+        high, low, close = data['High'], data['Low'], data['Close']
+
+        stoch_low = low.rolling(window=cfg.k_period).min()
+        stoch_high = high.rolling(window=cfg.k_period).max()
+        stoch_range = (stoch_high - stoch_low).replace(0, np.nan)
+        fast_k = (close - stoch_low) / stoch_range * 100
+        slow_k = fast_k.rolling(window=cfg.k_smooth).mean()
+        d = slow_k.rolling(window=cfg.d_period).mean()
+
+        wr_low = low.rolling(window=cfg.wr_period).min()
+        wr_high = high.rolling(window=cfg.wr_period).max()
+        wr_range = (wr_high - wr_low).replace(0, np.nan)
+        williams_r = (wr_high - close) / wr_range * -100
+
+        return {'k': slow_k, 'd': d, 'r': williams_r}
+
+    def classify_stoch_williams_signal(self, k_series, r_series):
+        """
+        직전 봉 대비 오늘 돌파 여부로 매수/매도 타이밍 신호를 판정한다.
+        스토캐스틱 %K와 Williams %R이 같은 날 동시에 돌파해야 확정 신호이며,
+        하나만 돌파하면 약한 신호, 돌파가 없으면 중립이다.
+        """
+        cfg = self.sw_config
+        if len(k_series) < 2 or len(r_series) < 2:
+            return "중립"
+
+        k_prev, k_curr = k_series.iloc[-2], k_series.iloc[-1]
+        r_prev, r_curr = r_series.iloc[-2], r_series.iloc[-1]
+
+        if pd.isna(k_prev) or pd.isna(k_curr) or pd.isna(r_prev) or pd.isna(r_curr):
+            return "중립"
+
+        k_cross_up = k_prev < cfg.stoch_oversold <= k_curr
+        r_cross_up = r_prev < cfg.wr_oversold <= r_curr
+        k_cross_down = k_prev > cfg.stoch_overbought >= k_curr
+        r_cross_down = r_prev > cfg.wr_overbought >= r_curr
+
+        if k_cross_up and r_cross_up:
+            return "매수 확정"
+        if k_cross_down and r_cross_down:
+            return "매도 확정"
+        if k_cross_up or r_cross_up:
+            return "관심 (약한 매수 신호)"
+        if k_cross_down or r_cross_down:
+            return "관심 (약한 매도 신호)"
+        return "중립"
+
+    def calculate_stoch_williams_signal(self, data):
+        """지표 계산과 신호 판정을 함께 수행해 UI에서 바로 쓸 수 있는 결과를 반환한다."""
+        indicators = self.calculate_stoch_williams(data)
+        signal = self.classify_stoch_williams_signal(indicators['k'], indicators['r'])
+        return {**indicators, 'signal': signal}
 
     def lppl_func(self, t, A, B, tc, m, C, omega, phi):
         """LPPL 표준 수식 (수학적 정합성 강화)"""

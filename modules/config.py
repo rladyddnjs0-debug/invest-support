@@ -56,12 +56,23 @@ class DataLoaderConfig(BaseModel):
     cache_expiry_days: int = 7
     data_dir: str = "data"
 
+class StochWilliamsConfig(BaseModel):
+    k_period: int = 14
+    k_smooth: int = 3
+    d_period: int = 3
+    wr_period: int = 14
+    stoch_oversold: float = 20.0
+    stoch_overbought: float = 80.0
+    wr_oversold: float = -80.0
+    wr_overbought: float = -20.0
+
 class AppConfig(BaseModel):
     lppl: LPPLEngineConfig
     attractiveness: AttractivenessConfig
     portfolio: PortfolioConfig
     screener: ScreenerConfig
     data_loader: DataLoaderConfig
+    stoch_williams: StochWilliamsConfig
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:
     if not os.path.exists(config_path):
