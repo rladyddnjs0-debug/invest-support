@@ -3,6 +3,17 @@ import pandas as pd
 import numpy as np
 from modules.models import AnalysisModel, QuantScreener, resolve_regime_choice
 
+
+def _build_ohlc(closes, high=100.0, low=0.0, start="2023-01-01"):
+    """High/Low를 고정해 Fast%K = Close, Williams %R = Close - 100 이 되도록 만든
+    테스트 전용 OHLC 데이터. 신호 판정 로직을 손으로 검증 가능하게 하기 위함."""
+    dates = pd.date_range(start=start, periods=len(closes))
+    return pd.DataFrame({
+        'High': [high] * len(closes),
+        'Low': [low] * len(closes),
+        'Close': closes,
+    }, index=dates)
+
 @pytest.fixture
 def mock_price_data():
     """테스트용 가상 가격 데이터 생성 (250일치)"""
@@ -254,3 +265,96 @@ def test_calculate_stock_weights_normal_case_unaffected_by_cap():
     for t in tickers:
         w = result.loc[result['Ticker'] == t, 'RecWeight'].iloc[0]
         assert w == pytest.approx(20.0, abs=0.5)
+
+
+def test_calculate_stoch_williams_value_ranges():
+    """%K/%D는 0~100, %R은 -100~0 범위를 벗어나지 않아야 한다."""
+    model = AnalysisModel()
+    np.random.seed(0)
+    closes = 50 + np.cumsum(np.random.normal(0, 2, 60))
+    data = _build_ohlc(closes.tolist(), high=max(closes) + 10, low=min(closes) - 10)
+
+    ind = model.calculate_stoch_williams(data)
+
+    assert ind['k'].dropna().between(0, 100).all()
+    assert ind['d'].dropna().between(0, 100).all()
+    assert ind['r'].dropna().between(-100, 0).all()
+
+
+def test_stoch_williams_signal_confirmed_buy_on_simultaneous_cross():
+    """Stochastic %K와 Williams %R이 같은 날 동시에 상향 돌파하면 '매수 확정'."""
+    model = AnalysisModel()
+    # 17일간 저점(Close=5, 깊은 과매도) 유지 후 55로 급등.
+    # High=100/Low=0 고정이므로 FastK=Close, %R=Close-100.
+    # 급등 당일에서 시리즈를 끝내야 함 — 신호는 "최근 봉의 돌파"만 인식하므로
+    # 돌파 후 며칠이 더 지나면(값이 그대로 유지돼도) 신호는 중립으로 되돌아간다.
+    closes = [5.0] * 17 + [55.0]
+    data = _build_ohlc(closes)
+
+    ind = model.calculate_stoch_williams(data)
+    signal = model.classify_stoch_williams_signal(ind['k'], ind['r'])
+
+    # 급등 당일(index 17)에 SlowK: mean(5,5,55)/3=21.67 (>=20, 직전 SlowK=5<20 → 돌파)
+    # %R: 55-100=-45 (>=-80, 직전 %R=5-100=-95<-80 → 돌파) => 동시 돌파
+    assert signal == "매수 확정"
+
+
+def test_stoch_williams_signal_weak_when_only_one_crosses():
+    """%R만 돌파하고 스토캐스틱 %K는 스무딩 지연으로 아직 못 넘으면 약한 신호."""
+    model = AnalysisModel()
+    # Close 5 -> 35: %R은 즉시 -65로 돌파하지만, SlowK는 3일 평균이라 첫날엔 15로 미돌파.
+    closes = [5.0] * 17 + [35.0]
+    data = _build_ohlc(closes)
+
+    ind = model.calculate_stoch_williams(data)
+    signal = model.classify_stoch_williams_signal(ind['k'], ind['r'])
+
+    assert signal == "관심 (약한 매수 신호)"
+
+
+def test_stoch_williams_signal_confirmed_sell_on_simultaneous_cross():
+    """과매수 구간에서 %K/%R이 동시에 하향 돌파하면 '매도 확정'."""
+    model = AnalysisModel()
+    # 17일간 고점(Close=95, 깊은 과매수) 유지 후 45로 급락 (급락 당일에서 종료).
+    closes = [95.0] * 17 + [45.0]
+    data = _build_ohlc(closes)
+
+    ind = model.calculate_stoch_williams(data)
+    signal = model.classify_stoch_williams_signal(ind['k'], ind['r'])
+
+    # 급락 당일 SlowK: mean(95,95,45)/3=78.33 (<=80, 직전 95>80 → 돌파)
+    # %R: 45-100=-55 (<=-20, 직전 -5>-20 → 돌파) => 동시 돌파
+    assert signal == "매도 확정"
+
+
+def test_stoch_williams_signal_neutral_without_fresh_cross():
+    """돌파 이벤트가 없으면(평탄한 구간) 중립."""
+    model = AnalysisModel()
+    closes = [50.0] * 20
+    data = _build_ohlc(closes)
+
+    ind = model.calculate_stoch_williams(data)
+    signal = model.classify_stoch_williams_signal(ind['k'], ind['r'])
+
+    assert signal == "중립"
+
+
+def test_calculate_stoch_williams_ignores_trailing_incomplete_bar():
+    """yfinance가 당일 캔들을 아직 채우지 못해 마지막 행의 High/Low/Close가
+    NaN인 경우에도, 그 앞의 마지막 유효 거래일 기준으로 값이 계산되어야 한다
+    (매번 N/A로만 표시되는 것을 방지)."""
+    model = AnalysisModel()
+    closes = [5.0] * 17 + [55.0]
+    data = _build_ohlc(closes)
+
+    # 미확정 당일 캔들 한 줄 추가 (High/Low/Close가 비어 있음)
+    incomplete_row = pd.DataFrame({'High': [np.nan], 'Low': [np.nan], 'Close': [np.nan]},
+                                  index=[data.index[-1] + pd.Timedelta(days=1)])
+    data_with_incomplete_bar = pd.concat([data, incomplete_row])
+
+    ind = model.calculate_stoch_williams(data_with_incomplete_bar)
+    signal = model.classify_stoch_williams_signal(ind['k'], ind['r'])
+
+    assert pd.notna(ind['k'].iloc[-1])
+    assert pd.notna(ind['r'].iloc[-1])
+    assert signal == "매수 확정"

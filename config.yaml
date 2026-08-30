@@ -80,3 +80,14 @@ screener:
 data_loader:
   cache_expiry_days: 7
   data_dir: "data"
+
+# Stochastic(%K/%D) & Williams %R — 매수/매도 타이밍 신호
+stoch_williams:
+  k_period: 14
+  k_smooth: 3
+  d_period: 3
+  wr_period: 14
+  stoch_oversold: 20
+  stoch_overbought: 80
+  wr_oversold: -80
+  wr_overbought: -20

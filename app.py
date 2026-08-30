@@ -4,6 +4,7 @@ import numpy as np
 import os
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 from modules.data_loader import DataLoader
 from modules.models import AnalysisModel, QuantScreener, resolve_regime_choice
 from modules.ai_reporter import AIReporter
@@ -179,6 +180,46 @@ def show_stock_details(ticker):
                 with st.spinner('계산 중...'):
                     st.session_state[f"lppl_{ticker}"] = engine.run_lppl_fit(prices)
                     st.rerun() # Fragment만 리런
+
+        st.markdown("---")
+        st.write("#### 📈 스토캐스틱 & 윌리엄스 %R 매수/매도 타이밍")
+
+        sw = engine.calculate_stoch_williams_signal(data)
+        k_series, d_series, r_series, signal = sw['k'], sw['d'], sw['r'], sw['signal']
+
+        if signal == "매수 확정":
+            st.success(f"🎯 **{signal}**")
+        elif signal == "매도 확정":
+            st.error(f"🚫 **{signal}**")
+        elif "약한" in signal:
+            st.warning(f"👀 **{signal}**")
+        else:
+            st.info(f"⏸️ **{signal}**")
+
+        sw1, sw2, sw3 = st.columns(3)
+        sw1.metric("Stochastic %K", f"{k_series.iloc[-1]:.1f}" if pd.notna(k_series.iloc[-1]) else "N/A")
+        sw2.metric("Stochastic %D", f"{d_series.iloc[-1]:.1f}" if pd.notna(d_series.iloc[-1]) else "N/A")
+        sw3.metric("Williams %R", f"{r_series.iloc[-1]:.1f}" if pd.notna(r_series.iloc[-1]) else "N/A")
+
+        sw_cfg = settings.stoch_williams
+        recent_n = 120  # 최근 ~120거래일만 표시 (가독성)
+        k_recent, d_recent, r_recent = k_series.tail(recent_n), d_series.tail(recent_n), r_series.tail(recent_n)
+
+        fig_sw = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                                subplot_titles=("Stochastic %K/%D", "Williams %R"))
+        fig_sw.add_trace(go.Scatter(x=k_recent.index, y=k_recent.values, name='%K', line=dict(color='cyan')), row=1, col=1)
+        fig_sw.add_trace(go.Scatter(x=d_recent.index, y=d_recent.values, name='%D', line=dict(color='orange')), row=1, col=1)
+        fig_sw.add_hline(y=sw_cfg.stoch_overbought, line_dash="dash", line_color="#ff4b4b", row=1, col=1)
+        fig_sw.add_hline(y=sw_cfg.stoch_oversold, line_dash="dash", line_color="#00c04b", row=1, col=1)
+        fig_sw.update_yaxes(range=[0, 100], row=1, col=1)
+
+        fig_sw.add_trace(go.Scatter(x=r_recent.index, y=r_recent.values, name='%R', line=dict(color='white')), row=2, col=1)
+        fig_sw.add_hline(y=sw_cfg.wr_overbought, line_dash="dash", line_color="#ff4b4b", row=2, col=1)
+        fig_sw.add_hline(y=sw_cfg.wr_oversold, line_dash="dash", line_color="#00c04b", row=2, col=1)
+        fig_sw.update_yaxes(range=[-100, 0], row=2, col=1)
+
+        fig_sw.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=30, b=10), showlegend=True)
+        st.plotly_chart(fig_sw, use_container_width=True)
 
         st.markdown("---")
         # 뉴스 섹션
